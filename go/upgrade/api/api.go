@@ -4,8 +4,8 @@ package api
 import (
 	"context"
 
+	beacon "github.com/oasisprotocol/oasis-core/go/beacon/api"
 	"github.com/oasisprotocol/oasis-core/go/common/errors"
-	epochtime "github.com/oasisprotocol/oasis-core/go/epochtime/api"
 )
 
 const (
@@ -72,7 +72,7 @@ type Descriptor struct {
 	// Upgrade methods other than "internal" may have differently formatted identifiers.
 	Identifier string `json:"identifier"`
 	// Epoch is the epoch at which the upgrade should happen.
-	Epoch epochtime.EpochTime `json:"epoch"`
+	Epoch beacon.EpochTime `json:"epoch"`
 }
 
 // IsValid checks if the upgrade descriptor is valid.
@@ -143,7 +143,7 @@ type Backend interface {
 
 	// ConsensusUpgrade performs the consensus portion of the upgrade.
 	// It is idempotent with respect to the current upgrade descriptor.
-	ConsensusUpgrade(interface{}, epochtime.EpochTime, int64) error
+	ConsensusUpgrade(interface{}, beacon.EpochTime, int64) error
 
 	// Close cleans up any upgrader state and database handles.
 	Close()

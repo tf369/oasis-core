@@ -28,7 +28,6 @@ import (
 	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/api"
 	tmcommon "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/common"
 	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/crypto"
-	epochtime "github.com/oasisprotocol/oasis-core/go/epochtime/api"
 	genesis "github.com/oasisprotocol/oasis-core/go/genesis/api"
 	keymanager "github.com/oasisprotocol/oasis-core/go/keymanager/api"
 	cmflags "github.com/oasisprotocol/oasis-core/go/oasis-node/cmd/common/flags"
@@ -189,12 +188,12 @@ func (srv *seedService) EstimateGas(ctx context.Context, req *consensus.Estimate
 }
 
 // Implements Backend.
-func (srv *seedService) WaitEpoch(ctx context.Context, epoch epochtime.EpochTime) error {
+func (srv *seedService) WaitEpoch(ctx context.Context, epoch beacon.EpochTime) error {
 	return consensus.ErrUnsupported
 }
 
 // Implements Backend.
-func (srv *seedService) GetEpoch(ctx context.Context, height int64) (epochtime.EpochTime, error) {
+func (srv *seedService) GetEpoch(ctx context.Context, height int64) (beacon.EpochTime, error) {
 	return 0, consensus.ErrUnsupported
 }
 
@@ -254,16 +253,13 @@ func (srv *seedService) SubmitTxNoWait(ctx context.Context, tx *transaction.Sign
 }
 
 // Implements Backend.
-func (srv *seedService) RegisterHaltHook(func(ctx context.Context, blockHeight int64, epoch epochtime.EpochTime)) {
+func (srv *seedService) RegisterHaltHook(func(ctx context.Context, blockHeight int64, epoch beacon.EpochTime)) {
 	panic(consensus.ErrUnsupported)
 }
 
 // Note: SupportedFeatures() indicates that the backend does not support
 // consensus services so the caller is at fault for not adhering to the
 // SupportedFeatures flag, in case any of the following methods is called.
-func (srv *seedService) EpochTime() epochtime.Backend {
-	panic(consensus.ErrUnsupported)
-}
 
 // Implements Backend.
 func (srv *seedService) Beacon() beacon.Backend {

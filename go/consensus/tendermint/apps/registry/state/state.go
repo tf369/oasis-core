@@ -6,6 +6,7 @@ import (
 
 	"github.com/oasisprotocol/oasis-core/go/common"
 	"github.com/oasisprotocol/oasis-core/go/common/cbor"
+	"github.com/oasisprotocol/oasis-core/go/common/crypto/scrape"
 	"github.com/oasisprotocol/oasis-core/go/common/crypto/signature"
 	"github.com/oasisprotocol/oasis-core/go/common/entity"
 	"github.com/oasisprotocol/oasis-core/go/common/keyformat"
@@ -69,6 +70,12 @@ var (
 	//
 	// Value is empty.
 	signedRuntimeByEntityKeyFmt = keyformat.New(0x19, keyformat.H(&signature.PublicKey{}), keyformat.H(&common.Namespace{}))
+	// beaconPointMapKeyFmt is the key format used for the point-to-node-id-map.
+	//
+	// This stores the beacon point to node ID mapping.
+	//
+	// Value is binary signature.PublicKey (node ID).
+	beaconPointMapKeyFmt = keyformat.New(0x1a, keyformat.H(&scrape.Point{}))
 )
 
 // ImmutableState is the immutable registry state wrapper.
@@ -509,6 +516,23 @@ func (s *ImmutableState) NodeBySubKey(ctx context.Context, key signature.PublicK
 	return s.Node(ctx, id)
 }
 
+// NodeByBeaconPoint looks up a specific node by its beacon point.
+func (s *ImmutableState) NodeByBeaconPoint(ctx context.Context, point scrape.Point) (*node.Node, error) {
+	rawID, err := s.is.Get(ctx, beaconPointMapKeyFmt.Encode(&point))
+	if err != nil {
+		return nil, abciAPI.UnavailableStateError(err)
+	}
+	if rawID == nil {
+		return nil, registry.ErrNoSuchNode
+	}
+
+	var id signature.PublicKey
+	if err := id.UnmarshalBinary(rawID); err != nil {
+		return nil, abciAPI.UnavailableStateError(err)
+	}
+	return s.Node(ctx, id)
+}
+
 func NewImmutableState(ctx context.Context, state abciAPI.ApplicationQueryState, version int64) (*ImmutableState, error) {
 	is, err := abciAPI.NewImmutableState(ctx, state, version)
 	if err != nil {
@@ -608,6 +632,21 @@ func (s *MutableState) SetNode(ctx context.Context, existingNode, node *node.Nod
 		return abciAPI.UnavailableStateError(err)
 	}
 
+	// Beacon point.
+	if existingNode != nil && existingNode.Beacon != nil {
+		// Remove old beacon point mapping if it has changed.
+		if node.Beacon == nil || !existingNode.Beacon.Point.Inner().Equal(node.Beacon.Point.Inner()) {
+			if err = s.ms.Remove(ctx, beaconPointMapKeyFmt.Encode(&existingNode.Beacon.Point)); err != nil {
+				return abciAPI.UnavailableStateError(err)
+			}
+		}
+	}
+	if node.Beacon != nil {
+		if err = s.ms.Insert(ctx, beaconPointMapKeyFmt.Encode(&node.Beacon.Point), rawNodeID); err != nil {
+			return abciAPI.UnavailableStateError(err)
+		}
+	}
+
 	return nil
 }
 
@@ -636,6 +675,12 @@ func (s *MutableState) RemoveNode(ctx context.Context, node *node.Node) error {
 	}
 	if err := s.ms.Remove(ctx, keyMapKeyFmt.Encode(&node.TLS.PubKey)); err != nil {
 		return abciAPI.UnavailableStateError(err)
+	}
+
+	if node.Beacon != nil {
+		if err := s.ms.Remove(ctx, beaconPointMapKeyFmt.Encode(&node.Beacon.Point)); err != nil {
+			return abciAPI.UnavailableStateError(err)
+		}
 	}
 
 	return nil

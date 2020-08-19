@@ -11,7 +11,10 @@ import (
 // Query is the beacon query interface.
 type Query interface {
 	Beacon(context.Context) ([]byte, error)
+	Epoch(context.Context) (beacon.EpochTime, int64, error)
 	Genesis(context.Context) (*beacon.Genesis, error)
+
+	SCRAPEState(context.Context) (*beacon.SCRAPEState, error)
 }
 
 // QueryFactory is the beacon query factory.
@@ -34,6 +37,14 @@ type beaconQuerier struct {
 
 func (bq *beaconQuerier) Beacon(ctx context.Context) ([]byte, error) {
 	return bq.state.Beacon(ctx)
+}
+
+func (bq *beaconQuerier) Epoch(ctx context.Context) (beacon.EpochTime, int64, error) {
+	return bq.state.GetEpoch(ctx)
+}
+
+func (bq *beaconQuerier) SCRAPEState(ctx context.Context) (*beacon.SCRAPEState, error) {
+	return bq.state.SCRAPEState(ctx)
 }
 
 func (app *beaconApplication) QueryFactory() interface{} {

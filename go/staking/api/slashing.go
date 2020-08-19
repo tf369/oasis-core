@@ -3,8 +3,8 @@ package api
 import (
 	"fmt"
 
+	beacon "github.com/oasisprotocol/oasis-core/go/beacon/api"
 	"github.com/oasisprotocol/oasis-core/go/common/quantity"
-	epochtime "github.com/oasisprotocol/oasis-core/go/epochtime/api"
 )
 
 // SlashReason is the reason why a node was slashed.
@@ -51,6 +51,6 @@ func (s *SlashReason) UnmarshalText(text []byte) error {
 
 // Slash is the per-reason slashing configuration.
 type Slash struct {
-	Amount         quantity.Quantity   `json:"amount"`
-	FreezeInterval epochtime.EpochTime `json:"freeze_interval"`
+	Amount         quantity.Quantity `json:"amount"`
+	FreezeInterval beacon.EpochTime  `json:"freeze_interval"`
 }

@@ -125,7 +125,7 @@ func (sc *stakeCLIImpl) Fixture() (*oasis.NetworkFixture, error) {
 	}
 
 	// We will mock epochs for reclaiming the escrow.
-	f.Network.EpochtimeMock = true
+	f.Network.SetMockEpoch()
 
 	// Enable some features in the staking system that we'll test.
 	f.Network.StakingGenesis = &api.Genesis{

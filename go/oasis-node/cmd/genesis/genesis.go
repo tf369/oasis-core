@@ -28,7 +28,6 @@ import (
 	"github.com/oasisprotocol/oasis-core/go/consensus/api/transaction"
 	consensusGenesis "github.com/oasisprotocol/oasis-core/go/consensus/genesis"
 	tendermint "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/api"
-	epochtime "github.com/oasisprotocol/oasis-core/go/epochtime/api"
 	genesis "github.com/oasisprotocol/oasis-core/go/genesis/api"
 	genesisFile "github.com/oasisprotocol/oasis-core/go/genesis/file"
 	keymanager "github.com/oasisprotocol/oasis-core/go/keymanager/api"
@@ -69,11 +68,16 @@ const (
 	cfgSchedulerDebugStaticValidators  = "scheduler.debug.static_validators"
 
 	// Beacon config flags.
-	cfgBeaconDebugDeterministic = "beacon.debug.deterministic"
-
-	// EpochTime config flags.
-	cfgEpochTimeDebugMockBackend   = "epochtime.debug.mock_backend"
-	cfgEpochTimeTendermintInterval = "epochtime.tendermint.interval"
+	CfgBeaconBackend                    = "beacon.backend"
+	CfgBeaconDebugDeterministic         = "beacon.debug.deterministic"
+	CfgBeaconDebugMockBackend           = "beacon.debug.mock_backend"
+	CfgBeaconInsecureTendermintInterval = "beacon.insecure.tendermint.interval"
+	CfgBeaconSCRAPEParticipants         = "beacon.scrape.participants"
+	CfgBeaconSCRAPEThreshold            = "beacon.scrape.threshold"
+	CfgBeaconSCRAPEPVSSThreshold        = "beacon.scrape.pvss_threshold"
+	CfgBeaconSCRAPECommitInterval       = "beacon.scrape.commit_interval"
+	CfgBeaconSCRAPERevealInterval       = "beacon.scrape.reveal_interval"
+	CfgBeaconSCRAPETransitionDelay      = "beacon.scrape.transition_delay"
 
 	// Roothash config flags.
 	cfgRoothashDebugDoNotSuspendRuntimes = "roothash.debug.do_not_suspend_runtimes"
@@ -169,7 +173,7 @@ func doInitGenesis(cmd *cobra.Command, args []string) {
 		Height:    viper.GetInt64(cfgInitialHeight),
 		ChainID:   chainID,
 		Time:      time.Now(),
-		HaltEpoch: epochtime.EpochTime(viper.GetUint64(cfgHaltEpoch)),
+		HaltEpoch: beacon.EpochTime(viper.GetUint64(cfgHaltEpoch)),
 	}
 	entities := viper.GetStringSlice(viperEntity)
 	runtimes := viper.GetStringSlice(cfgRuntime)
@@ -217,15 +221,26 @@ func doInitGenesis(cmd *cobra.Command, args []string) {
 
 	doc.Beacon = beacon.Genesis{
 		Parameters: beacon.ConsensusParameters{
-			DebugDeterministic: viper.GetBool(cfgBeaconDebugDeterministic),
+			Backend:            viper.GetString(CfgBeaconBackend),
+			DebugDeterministic: viper.GetBool(CfgBeaconDebugDeterministic),
+			DebugMockBackend:   viper.GetBool(CfgBeaconDebugMockBackend),
 		},
 	}
-
-	doc.EpochTime = epochtime.Genesis{
-		Parameters: epochtime.ConsensusParameters{
-			DebugMockBackend: viper.GetBool(cfgEpochTimeDebugMockBackend),
-			Interval:         viper.GetInt64(cfgEpochTimeTendermintInterval),
-		},
+	switch doc.Beacon.Parameters.Backend {
+	case beacon.BackendInsecure:
+		doc.Beacon.Parameters.InsecureParameters = &beacon.InsecureParameters{
+			Interval: viper.GetInt64(CfgBeaconInsecureTendermintInterval),
+		}
+	case beacon.BackendSCRAPE:
+		doc.Beacon.Parameters.SCRAPEParameters = &beacon.SCRAPEParameters{
+			Participants:    viper.GetUint64(CfgBeaconSCRAPEParticipants),
+			Threshold:       viper.GetUint64(CfgBeaconSCRAPEThreshold),
+			PVSSThreshold:   viper.GetUint64(CfgBeaconSCRAPEPVSSThreshold),
+			CommitInterval:  viper.GetInt64(CfgBeaconSCRAPECommitInterval),
+			RevealInterval:  viper.GetInt64(CfgBeaconSCRAPERevealInterval),
+			TransitionDelay: viper.GetInt64(CfgBeaconSCRAPETransitionDelay),
+			GasCosts:        beacon.DefaultGasCosts, // TODO: Make these configurable.
+		}
 	}
 
 	var pkBlacklist []signature.PublicKey
@@ -709,13 +724,18 @@ func init() {
 	_ = initGenesisFlags.MarkHidden(cfgSchedulerDebugStaticValidators)
 
 	// Beacon config flags.
-	initGenesisFlags.Bool(cfgBeaconDebugDeterministic, false, "enable deterministic beacon output (UNSAFE)")
-	_ = initGenesisFlags.MarkHidden(cfgBeaconDebugDeterministic)
-
-	// EpochTime config flags.
-	initGenesisFlags.Bool(cfgEpochTimeDebugMockBackend, false, "use debug mock Epoch time backend")
-	initGenesisFlags.Int64(cfgEpochTimeTendermintInterval, 86400, "Epoch interval (in blocks)")
-	_ = initGenesisFlags.MarkHidden(cfgEpochTimeDebugMockBackend)
+	initGenesisFlags.String(CfgBeaconBackend, "insecure", "beacon backend")
+	initGenesisFlags.Bool(CfgBeaconDebugDeterministic, false, "enable deterministic beacon output (UNSAFE)")
+	initGenesisFlags.Bool(CfgBeaconDebugMockBackend, false, "use debug mock Epoch time backend")
+	initGenesisFlags.Int64(CfgBeaconInsecureTendermintInterval, 86400, "Epoch interval (in blocks)")
+	initGenesisFlags.Uint64(CfgBeaconSCRAPEParticipants, 10, "number of participants in a SCRAPE round")
+	initGenesisFlags.Uint64(CfgBeaconSCRAPEThreshold, 7, "threshold entropy contributors")
+	initGenesisFlags.Uint64(CfgBeaconSCRAPEPVSSThreshold, 7, "PVSS secret recovery threshold")
+	initGenesisFlags.Int64(CfgBeaconSCRAPECommitInterval, 43200, "SCRAPE round commit interval (in blocks)")
+	initGenesisFlags.Int64(CfgBeaconSCRAPERevealInterval, 34560, "SCRAPE round reveal interval (in blocks)")
+	initGenesisFlags.Int64(CfgBeaconSCRAPETransitionDelay, 8639, "SCRAPE round transition delay (in blocks)")
+	_ = initGenesisFlags.MarkHidden(CfgBeaconDebugDeterministic)
+	_ = initGenesisFlags.MarkHidden(CfgBeaconDebugMockBackend)
 
 	// Roothash config flags.
 	initGenesisFlags.Bool(cfgRoothashDebugDoNotSuspendRuntimes, false, "do not suspend runtimes (UNSAFE)")

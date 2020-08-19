@@ -3,10 +3,10 @@ package client
 import (
 	"context"
 
+	beacon "github.com/oasisprotocol/oasis-core/go/beacon/api"
 	"github.com/oasisprotocol/oasis-core/go/common"
 	"github.com/oasisprotocol/oasis-core/go/common/crypto/hash"
 	"github.com/oasisprotocol/oasis-core/go/common/service"
-	"github.com/oasisprotocol/oasis-core/go/epochtime/api"
 	"github.com/oasisprotocol/oasis-core/go/roothash/api/block"
 	"github.com/oasisprotocol/oasis-core/go/runtime/transaction"
 	storage "github.com/oasisprotocol/oasis-core/go/storage/api"
@@ -122,8 +122,8 @@ func (w *blockWatcher) watch() {
 			}
 
 			// Get group version.
-			var ce api.EpochTime
-			ce, err = w.common.consensus.EpochTime().GetEpoch(w.common.ctx, blk.Height)
+			var ce beacon.EpochTime
+			ce, err = w.common.consensus.Beacon().GetEpoch(w.common.ctx, blk.Height)
 			if err != nil {
 				w.Logger.Error("error getting epoch block",
 					"err", err,
@@ -132,7 +132,7 @@ func (w *blockWatcher) watch() {
 				continue
 			}
 			var ch int64
-			ch, err = w.common.consensus.EpochTime().GetEpochBlock(w.common.ctx, ce)
+			ch, err = w.common.consensus.Beacon().GetEpochBlock(w.common.ctx, ce)
 			if err != nil {
 				w.Logger.Error("error getting epoch number",
 					"err", err,

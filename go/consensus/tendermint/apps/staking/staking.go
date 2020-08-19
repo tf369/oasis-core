@@ -6,13 +6,13 @@ import (
 
 	"github.com/tendermint/tendermint/abci/types"
 
+	beacon "github.com/oasisprotocol/oasis-core/go/beacon/api"
 	"github.com/oasisprotocol/oasis-core/go/common/cbor"
 	"github.com/oasisprotocol/oasis-core/go/common/quantity"
 	"github.com/oasisprotocol/oasis-core/go/consensus/api/transaction"
 	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/api"
 	registryState "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/apps/registry/state"
 	stakingState "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/apps/staking/state"
-	epochtime "github.com/oasisprotocol/oasis-core/go/epochtime/api"
 	staking "github.com/oasisprotocol/oasis-core/go/staking/api"
 )
 
@@ -172,7 +172,7 @@ func (app *stakingApplication) EndBlock(ctx *api.Context, request types.RequestE
 	return types.ResponseEndBlock{}, nil
 }
 
-func (app *stakingApplication) onEpochChange(ctx *api.Context, epoch epochtime.EpochTime) error {
+func (app *stakingApplication) onEpochChange(ctx *api.Context, epoch beacon.EpochTime) error {
 	state := stakingState.NewMutableState(ctx.State())
 
 	// Delegation unbonding after debonding period elapses.

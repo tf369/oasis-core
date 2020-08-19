@@ -8,12 +8,12 @@ import (
 
 	"google.golang.org/grpc"
 
+	beacon "github.com/oasisprotocol/oasis-core/go/beacon/api"
 	"github.com/oasisprotocol/oasis-core/go/common/crypto/signature"
 	memorySigner "github.com/oasisprotocol/oasis-core/go/common/crypto/signature/signers/memory"
 	"github.com/oasisprotocol/oasis-core/go/common/logging"
 	consensus "github.com/oasisprotocol/oasis-core/go/consensus/api"
 	"github.com/oasisprotocol/oasis-core/go/consensus/api/transaction"
-	epochtime "github.com/oasisprotocol/oasis-core/go/epochtime/api"
 	staking "github.com/oasisprotocol/oasis-core/go/staking/api"
 )
 
@@ -40,7 +40,7 @@ type commission struct {
 
 // currentBound returns the rate bounds at the latest bound step that has
 // started or nil if no step has started.
-func currentBound(cs *staking.CommissionSchedule, now epochtime.EpochTime) *staking.CommissionRateBoundStep {
+func currentBound(cs *staking.CommissionSchedule, now beacon.EpochTime) *staking.CommissionRateBoundStep {
 	var latestStartedStep *staking.CommissionRateBoundStep
 	for i := range cs.Bounds {
 		step := &cs.Bounds[i]
@@ -56,7 +56,7 @@ func currentBound(cs *staking.CommissionSchedule, now epochtime.EpochTime) *stak
 // rules between start and end epoch. The function panics in case a rate step
 // cannot satisfy all bound rules so the caller should make sure that bounds
 // are not exclusive.
-func genValidRateStep(rng *rand.Rand, logger *logging.Logger, schedule staking.CommissionSchedule, startEpoch, endEpoch epochtime.EpochTime) staking.CommissionRateStep {
+func genValidRateStep(rng *rand.Rand, logger *logging.Logger, schedule staking.CommissionSchedule, startEpoch, endEpoch beacon.EpochTime) staking.CommissionRateStep {
 	startBound := currentBound(&schedule, startEpoch)
 	minBound := startBound.RateMin.ToBigInt().Int64()
 	maxBound := startBound.RateMax.ToBigInt().Int64()
@@ -190,7 +190,7 @@ func (c *commission) doAmendCommissionSchedule(ctx context.Context, rng *rand.Ra
 		amendSchedule.Amendment.Bounds = append(amendSchedule.Amendment.Bounds, bound)
 
 		// Set epoch for next bound.
-		boundEpoch = boundEpoch + (epochtime.EpochTime(rng.Intn(commissionMaxBoundChangeIntervals)+1) * c.rules.RateChangeInterval)
+		boundEpoch = boundEpoch + (beacon.EpochTime(rng.Intn(commissionMaxBoundChangeIntervals)+1) * c.rules.RateChangeInterval)
 	}
 
 	// newSchedule is a schedule that contains all bounds that will be in effect
@@ -247,7 +247,7 @@ func (c *commission) doAmendCommissionSchedule(ctx context.Context, rng *rand.Ra
 	var needMoreRateStpes bool
 	for i := 0; i < nMinRateSteps || needMoreRateStpes; i++ {
 		// startEpoch + rng[1, commissionMaxRateChangeIntervals]*RateChangeInterval
-		endEpoch := startEpoch + (epochtime.EpochTime(rng.Intn(commissionMaxRateChangeIntervals)+1) * c.rules.RateChangeInterval)
+		endEpoch := startEpoch + (beacon.EpochTime(rng.Intn(commissionMaxRateChangeIntervals)+1) * c.rules.RateChangeInterval)
 
 		// Get active bound at start epoch.
 		currentBound := currentBound(&newSchedule, startEpoch)

@@ -279,7 +279,7 @@ func (sc *E2E) dumpDatabase(childEnv *env.Env, fixture *oasis.NetworkFixture, ex
 
 	// Compare the two documents for approximate equality.  Note: Certain
 	// fields will be different, so those are fixed up before the comparison.
-	dbDoc.EpochTime.Base = exportedDoc.EpochTime.Base
+	dbDoc.Beacon.Base = exportedDoc.Beacon.Base
 	dbDoc.Time = exportedDoc.Time
 	dbRaw, err := json.Marshal(dbDoc)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
+	beacon "github.com/oasisprotocol/oasis-core/go/beacon/api"
 	beaconTests "github.com/oasisprotocol/oasis-core/go/beacon/tests"
 	"github.com/oasisprotocol/oasis-core/go/common"
 	"github.com/oasisprotocol/oasis-core/go/common/cbor"
@@ -24,8 +25,6 @@ import (
 	tendermintCommon "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/common"
 	tendermintFull "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/full"
 	consensusTests "github.com/oasisprotocol/oasis-core/go/consensus/tests"
-	epochtime "github.com/oasisprotocol/oasis-core/go/epochtime/api"
-	epochtimeTests "github.com/oasisprotocol/oasis-core/go/epochtime/tests"
 	cmdCommon "github.com/oasisprotocol/oasis-core/go/oasis-node/cmd/common"
 	cmdCommonFlags "github.com/oasisprotocol/oasis-core/go/oasis-node/cmd/common/flags"
 	"github.com/oasisprotocol/oasis-core/go/oasis-node/cmd/node"
@@ -244,7 +243,6 @@ func TestNode(t *testing.T) {
 
 		{"Consensus", testConsensus},
 		{"ConsensusClient", testConsensusClient},
-		{"EpochTime", testEpochTime},
 		{"Beacon", testBeacon},
 		{"Storage", testStorage},
 		{"Registry", testRegistry},
@@ -306,9 +304,9 @@ func testDeregisterEntityRuntime(t *testing.T, node *testNode) {
 
 	// Perform an epoch transition to expire the node as otherwise there is no way
 	// to deregister the entity.
-	require.Implements(t, (*epochtime.SetableBackend)(nil), node.Consensus.EpochTime(), "epoch time backend is mock")
-	timeSource := (node.Consensus.EpochTime()).(epochtime.SetableBackend)
-	_ = epochtimeTests.MustAdvanceEpoch(t, timeSource, 2+1+1) // 2 epochs for expiry, 1 for debonding, 1 for removal.
+	require.Implements(t, (*beacon.SetableBackend)(nil), node.Consensus.Beacon(), "epoch time backend is mock")
+	timeSource := (node.Consensus.Beacon()).(beacon.SetableBackend)
+	_ = beaconTests.MustAdvanceEpoch(t, timeSource, 2+1+1) // 2 epochs for expiry, 1 for debonding, 1 for removal.
 
 WaitLoop:
 	for {
@@ -366,14 +364,11 @@ func testConsensusClient(t *testing.T, node *testNode) {
 	consensusTests.ConsensusImplementationTests(t, client)
 }
 
-func testEpochTime(t *testing.T, node *testNode) {
-	epochtimeTests.EpochtimeSetableImplementationTest(t, node.Consensus.EpochTime())
-}
-
 func testBeacon(t *testing.T, node *testNode) {
-	timeSource := (node.Consensus.EpochTime()).(epochtime.SetableBackend)
+	beaconTests.EpochtimeSetableImplementationTest(t, node.Consensus.Beacon())
 
-	beaconTests.BeaconImplementationTests(t, node.Consensus.Beacon(), timeSource)
+	timeSource := (node.Consensus.Beacon()).(beacon.SetableBackend)
+	beaconTests.BeaconImplementationTests(t, timeSource)
 }
 
 func testStorage(t *testing.T, node *testNode) {
@@ -427,7 +422,7 @@ func testRootHash(t *testing.T, node *testNode) {
 }
 
 func testExecutorWorker(t *testing.T, node *testNode) {
-	timeSource := (node.Consensus.EpochTime()).(epochtime.SetableBackend)
+	timeSource := (node.Consensus.Beacon()).(beacon.SetableBackend)
 
 	require.NotNil(t, node.executorCommitteeNode)
 	executorWorkerTests.WorkerImplementationTests(

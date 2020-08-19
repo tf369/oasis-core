@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/oasisprotocol/oasis-core/go/beacon/api"
 	"github.com/oasisprotocol/oasis-core/go/common/pubsub"
-	"github.com/oasisprotocol/oasis-core/go/epochtime/api"
 )
 
 type simTimeSource struct {
@@ -41,13 +41,20 @@ func (b *simTimeSource) WatchLatestEpoch() (<-chan api.EpochTime, *pubsub.Subscr
 	panic("consim/epochtime: WatchLatestEpoch not supported")
 }
 
+func (b *simTimeSource) GetBeacon(ctx context.Context, height int64) ([]byte, error) {
+	panic("consim/epochtime: GetBeacon not supported")
+}
+
 func (b *simTimeSource) StateToGenesis(ctx context.Context, height int64) (*api.Genesis, error) {
 	// WARNING: This ignores the height because it's only used for the final
 	// dump.
 	return &api.Genesis{
 		Base: b.current,
 		Parameters: api.ConsensusParameters{
-			Interval: b.interval,
+			Backend: api.BackendInsecure,
+			InsecureParameters: &api.InsecureParameters{
+				Interval: b.interval,
+			},
 		},
 	}, nil
 }
@@ -56,6 +63,6 @@ func newSimTimeSource(genesis *api.Genesis) *simTimeSource {
 	return &simTimeSource{
 		base:     genesis.Base,
 		current:  genesis.Base,
-		interval: genesis.Parameters.Interval,
+		interval: genesis.Parameters.InsecureParameters.Interval,
 	}
 }

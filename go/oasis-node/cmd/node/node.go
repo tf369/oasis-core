@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	flag "github.com/spf13/pflag"
 
+	beacon "github.com/oasisprotocol/oasis-core/go/beacon/api"
 	"github.com/oasisprotocol/oasis-core/go/common"
 	"github.com/oasisprotocol/oasis-core/go/common/crash"
 	"github.com/oasisprotocol/oasis-core/go/common/crypto/signature"
@@ -27,7 +28,6 @@ import (
 	tendermintTestsGenesis "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/tests/genesis"
 	"github.com/oasisprotocol/oasis-core/go/control"
 	controlAPI "github.com/oasisprotocol/oasis-core/go/control/api"
-	epochtime "github.com/oasisprotocol/oasis-core/go/epochtime/api"
 	genesisAPI "github.com/oasisprotocol/oasis-core/go/genesis/api"
 	genesisFile "github.com/oasisprotocol/oasis-core/go/genesis/file"
 	genesisTestHelpers "github.com/oasisprotocol/oasis-core/go/genesis/tests"
@@ -54,6 +54,7 @@ import (
 	storageAPI "github.com/oasisprotocol/oasis-core/go/storage/api"
 	"github.com/oasisprotocol/oasis-core/go/upgrade"
 	upgradeAPI "github.com/oasisprotocol/oasis-core/go/upgrade/api"
+	workerBeacon "github.com/oasisprotocol/oasis-core/go/worker/beacon"
 	workerCommon "github.com/oasisprotocol/oasis-core/go/worker/common"
 	"github.com/oasisprotocol/oasis-core/go/worker/common/p2p"
 	"github.com/oasisprotocol/oasis-core/go/worker/compute"
@@ -123,6 +124,7 @@ type Node struct {
 	RegistrationWorker *registration.Worker
 	KeymanagerWorker   *workerKeymanager.Worker
 	ConsensusWorker    *workerConsensusRPC.Worker
+	BeaconWorker       *workerBeacon.Worker
 	readyCh            chan struct{}
 
 	logger *logging.Logger
@@ -202,7 +204,7 @@ func (n *Node) startRuntimeServices() error {
 	keymanagerAPI.RegisterService(grpcSrv, n.Consensus.KeyManager())
 
 	// Register dump genesis halt hook.
-	n.Consensus.RegisterHaltHook(func(ctx context.Context, blockHeight int64, epoch epochtime.EpochTime) {
+	n.Consensus.RegisterHaltHook(func(ctx context.Context, blockHeight int64, epoch beacon.EpochTime) {
 		n.logger.Info("Consensus halt hook: dumping genesis",
 			"epoch", epoch,
 			"block_height", blockHeight,
@@ -326,7 +328,7 @@ func (n *Node) initRuntimeWorkers() error {
 	// Initialize the registration worker.
 	n.RegistrationWorker, err = registration.New(
 		dataDir,
-		n.Consensus.EpochTime(),
+		n.Consensus.Beacon(),
 		n.Consensus.Registry(),
 		n.Identity,
 		n.Consensus,
@@ -347,6 +349,17 @@ func (n *Node) initRuntimeWorkers() error {
 		return err
 	}
 	n.svcMgr.Register(n.RegistrationWorker)
+
+	// Initialize the beacon worker.
+	n.BeaconWorker, err = workerBeacon.New(
+		n.Identity,
+		n.Consensus,
+		n.commonStore,
+	)
+	if err != nil {
+		return err
+	}
+	n.svcMgr.Register(n.BeaconWorker)
 
 	// Initialize the storage worker.
 	n.StorageWorker, err = workerStorage.New(
@@ -437,6 +450,11 @@ func (n *Node) startRuntimeWorkers() error {
 		return err
 	}
 
+	// Start the beacon worker.
+	if err := n.BeaconWorker.Start(); err != nil {
+		return err
+	}
+
 	// Start the sentry worker.
 	if err := n.SentryWorker.Start(); err != nil {
 		return err
@@ -494,7 +512,7 @@ func (n *Node) initGenesis(testNode bool) error {
 	return nil
 }
 
-func (n *Node) dumpGenesis(ctx context.Context, blockHeight int64, epoch epochtime.EpochTime) error {
+func (n *Node) dumpGenesis(ctx context.Context, blockHeight int64, epoch beacon.EpochTime) error {
 	doc, err := n.Consensus.StateToGenesis(ctx, blockHeight)
 	if err != nil {
 		return fmt.Errorf("dumpGenesis: failed to get genesis: %w", err)

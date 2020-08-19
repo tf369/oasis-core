@@ -52,15 +52,12 @@ import (
 	tmcommon "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/common"
 	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/crypto"
 	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/db"
-	tmepochtime "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/epochtime"
-	tmepochtimemock "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/epochtime_mock"
 	tmkeymanager "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/keymanager"
 	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/light"
 	tmregistry "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/registry"
 	tmroothash "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/roothash"
 	tmscheduler "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/scheduler"
 	tmstaking "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/staking"
-	epochtimeAPI "github.com/oasisprotocol/oasis-core/go/epochtime/api"
 	genesisAPI "github.com/oasisprotocol/oasis-core/go/genesis/api"
 	keymanagerAPI "github.com/oasisprotocol/oasis-core/go/keymanager/api"
 	cmbackground "github.com/oasisprotocol/oasis-core/go/oasis-node/cmd/common/background"
@@ -163,7 +160,6 @@ type fullService struct { // nolint: maligned
 	stateStore tmstate.Store
 
 	beacon        beaconAPI.Backend
-	epochtime     epochtimeAPI.Backend
 	keymanager    keymanagerAPI.Backend
 	registry      registryAPI.Backend
 	roothash      roothashAPI.Backend
@@ -327,9 +323,9 @@ func (t *fullService) StateToGenesis(ctx context.Context, blockHeight int64) (*g
 	}
 
 	// Call StateToGenesis on all backends and merge the results together.
-	epochtimeGenesis, err := t.epochtime.StateToGenesis(ctx, blockHeight)
+	beaconGenesis, err := t.beacon.StateToGenesis(ctx, blockHeight)
 	if err != nil {
-		t.Logger.Error("epochtime StateToGenesis failure",
+		t.Logger.Error("beacon StateToGenesis failure",
 			"err", err,
 			"block_height", blockHeight,
 		)
@@ -386,13 +382,12 @@ func (t *fullService) StateToGenesis(ctx context.Context, blockHeight int64) (*g
 		ChainID:    genesisDoc.ChainID,
 		HaltEpoch:  genesisDoc.HaltEpoch,
 		Time:       blk.Header.Time,
-		EpochTime:  *epochtimeGenesis,
+		Beacon:     *beaconGenesis,
 		Registry:   *registryGenesis,
 		RootHash:   *roothashGenesis,
 		Staking:    *stakingGenesis,
 		KeyManager: *keymanagerGenesis,
 		Scheduler:  *schedulerGenesis,
-		Beacon:     genesisDoc.Beacon,
 		Consensus:  genesisDoc.Consensus,
 	}, nil
 }
@@ -401,7 +396,7 @@ func (t *fullService) GetGenesisDocument(ctx context.Context) (*genesisAPI.Docum
 	return t.genesis, nil
 }
 
-func (t *fullService) RegisterHaltHook(hook func(context.Context, int64, epochtimeAPI.EpochTime)) {
+func (t *fullService) RegisterHaltHook(hook func(context.Context, int64, beaconAPI.EpochTime)) {
 	if !t.initialized() {
 		return
 	}
@@ -584,10 +579,6 @@ func (t *fullService) SubmissionManager() consensusAPI.SubmissionManager {
 	return t.submissionMgr
 }
 
-func (t *fullService) EpochTime() epochtimeAPI.Backend {
-	return t.epochtime
-}
-
 func (t *fullService) Beacon() beaconAPI.Backend {
 	return t.beacon
 }
@@ -612,19 +603,19 @@ func (t *fullService) Scheduler() schedulerAPI.Backend {
 	return t.scheduler
 }
 
-func (t *fullService) GetEpoch(ctx context.Context, height int64) (epochtimeAPI.EpochTime, error) {
-	if t.epochtime == nil {
-		return epochtimeAPI.EpochInvalid, consensusAPI.ErrUnsupported
+func (t *fullService) GetEpoch(ctx context.Context, height int64) (beaconAPI.EpochTime, error) {
+	if t.beacon == nil {
+		return beaconAPI.EpochInvalid, consensusAPI.ErrUnsupported
 	}
-	return t.epochtime.GetEpoch(ctx, height)
+	return t.beacon.GetEpoch(ctx, height)
 }
 
-func (t *fullService) WaitEpoch(ctx context.Context, epoch epochtimeAPI.EpochTime) error {
-	if t.epochtime == nil {
+func (t *fullService) WaitEpoch(ctx context.Context, epoch beaconAPI.EpochTime) error {
+	if t.beacon == nil {
 		return consensusAPI.ErrUnsupported
 	}
 
-	ch, sub := t.epochtime.WatchEpochs()
+	ch, sub := t.beacon.WatchEpochs()
 	defer sub.Close()
 
 	for {
@@ -886,25 +877,25 @@ func (t *fullService) initialize() error {
 		}
 	}
 
-	if err := t.initEpochtime(); err != nil {
-		return err
-	}
-	if err := t.mux.SetEpochtime(t.epochtime); err != nil {
-		return err
-	}
+	// Initialize the beacon/epochtime backend.
+	var (
+		err error
 
-	// Initialize the rest of backends.
-	var err error
-	var scBeacon tmbeacon.ServiceClient
+		scBeacon tmbeacon.ServiceClient
+	)
 	if scBeacon, err = tmbeacon.New(t.ctx, t); err != nil {
-		t.Logger.Error("initialize: failed to initialize beacon backend",
+		t.Logger.Error("initialize: failed to initialize beapoch backend",
 			"err", err,
 		)
 		return err
 	}
 	t.beacon = scBeacon
 	t.serviceClients = append(t.serviceClients, scBeacon)
+	if err = t.mux.SetEpochtime(t.beacon); err != nil {
+		return err
+	}
 
+	// Initialize the rest of backends.
 	var scKeyManager tmkeymanager.ServiceClient
 	if scKeyManager, err = tmkeymanager.New(t.ctx, t); err != nil {
 		t.Logger.Error("initialize: failed to initialize keymanager backend",
@@ -1038,34 +1029,6 @@ func (t *fullService) WatchTendermintBlocks() (<-chan *tmtypes.Block, *pubsub.Su
 
 func (t *fullService) ConsensusKey() signature.PublicKey {
 	return t.identity.ConsensusSigner.Public()
-}
-
-func (t *fullService) initEpochtime() error {
-	var err error
-	if t.genesis.EpochTime.Parameters.DebugMockBackend {
-		var scEpochTime tmepochtimemock.ServiceClient
-		scEpochTime, err = tmepochtimemock.New(t.ctx, t)
-		if err != nil {
-			t.Logger.Error("initEpochtime: failed to initialize mock epochtime backend",
-				"err", err,
-			)
-			return err
-		}
-		t.epochtime = scEpochTime
-		t.serviceClients = append(t.serviceClients, scEpochTime)
-	} else {
-		var scEpochTime tmepochtime.ServiceClient
-		scEpochTime, err = tmepochtime.New(t.ctx, t, t.genesis.EpochTime.Parameters.Interval)
-		if err != nil {
-			t.Logger.Error("initEpochtime: failed to initialize epochtime backend",
-				"err", err,
-			)
-			return err
-		}
-		t.epochtime = scEpochTime
-		t.serviceClients = append(t.serviceClients, scEpochTime)
-	}
-	return nil
 }
 
 func (t *fullService) lazyInit() error {
