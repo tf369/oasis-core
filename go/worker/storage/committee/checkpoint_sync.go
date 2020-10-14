@@ -13,7 +13,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 
-	"github.com/oasisprotocol/oasis-core/go/common/crypto/hash"
 	"github.com/oasisprotocol/oasis-core/go/runtime/committee"
 	schedulerApi "github.com/oasisprotocol/oasis-core/go/scheduler/api"
 	storageApi "github.com/oasisprotocol/oasis-core/go/storage/api"
@@ -356,14 +355,14 @@ func (n *Node) checkCheckpointUsable(cp *checkpoint.Metadata, remainingMask outs
 	}
 	_, lastIORoot, lastStateRoot := n.GetLastSynced()
 	if namespace.Equal(&blk.Header.Namespace) {
-		if blk.Header.IORoot.Equal(&cp.Root.Hash) {
+		if cp.Root.Type == storageApi.RootTypeIO && blk.Header.IORoot.Equal(&cp.Root.Hash) {
 			// Do we already have this root?
 			if lastIORoot.Version < cp.Root.Version && remainingMask&maskIO != maskNone {
 				return maskIO
 			}
 			return maskNone
 		}
-		if blk.Header.StateRoot.Equal(&cp.Root.Hash) {
+		if cp.Root.Type == storageApi.RootTypeState && blk.Header.StateRoot.Equal(&cp.Root.Hash) {
 			// Do we already have this root?
 			if lastStateRoot.Version < cp.Root.Version && remainingMask&maskState != maskNone {
 				return maskState
@@ -413,7 +412,7 @@ func (n *Node) syncCheckpoints() (*blockSummary, error) {
 	// Try all the checkpoints now, from most recent backwards.
 	var prevVersion uint64
 	var mask outstandingMask
-	var doneRoots []hash.Hash
+	var doneRoots []storageApi.Root
 	remainingRoots := maskAll
 	for _, check := range metadata {
 		mask = n.checkCheckpointUsable(check, remainingRoots)
@@ -429,7 +428,7 @@ func (n *Node) syncCheckpoints() (*blockSummary, error) {
 			}
 			remainingRoots = maskAll
 			prevVersion = check.Root.Version
-			doneRoots = []hash.Hash{}
+			doneRoots = []storageApi.Root{}
 		}
 
 		status, err := n.handleCheckpoint(check, committeeClient, descriptor.Storage.GroupSize)
@@ -446,10 +445,10 @@ func (n *Node) syncCheckpoints() (*blockSummary, error) {
 				syncState.StateRoot = check.Root
 			}
 
-			doneRoots = append(doneRoots, check.Root.Hash)
+			doneRoots = append(doneRoots, check.Root)
 			remainingRoots &= ^mask
 			if remainingRoots == maskNone {
-				if err = n.localStorage.NodeDB().Finalize(n.ctx, prevVersion, doneRoots); err != nil {
+				if err = n.localStorage.NodeDB().Finalize(n.ctx, doneRoots); err != nil {
 					n.logger.Error("can't finalize version after all checkpoints restored",
 						"err", err,
 						"version", prevVersion,

@@ -35,7 +35,7 @@ use crate::{
     storage::{
         mkvs::{
             sync::{HostReadSyncer, NoopReadSyncer},
-            Root, Tree,
+            Root, RootType, Tree,
         },
         StorageContext,
     },
@@ -313,6 +313,7 @@ impl Dispatcher {
         cache.maybe_replace(Root {
             namespace: block.header.namespace,
             version: block.header.round,
+            root_type: RootType::State,
             hash: block.header.state_root,
         });
 
@@ -366,6 +367,7 @@ impl Dispatcher {
                         Root {
                             namespace: block.header.namespace,
                             version: block.header.round + 1,
+                            root_type: RootType::IO,
                             hash: Hash::empty_hash(),
                         },
                     );
@@ -502,7 +504,9 @@ impl Dispatcher {
 
                     // Request, dispatch.
                     let ctx = ctx.freeze();
-                    let mut mkvs = Tree::make().new(Box::new(NoopReadSyncer));
+                    let mut mkvs = Tree::make()
+                        .with_root_type(RootType::IO)
+                        .new(Box::new(NoopReadSyncer));
                     let untrusted_local = Arc::new(ProtocolUntrustedLocalStorage::new(
                         Context::create_child(&ctx),
                         protocol.clone(),
@@ -583,7 +587,9 @@ impl Dispatcher {
 
         // Request, dispatch.
         let ctx = ctx.freeze();
-        let mut mkvs = Tree::make().new(Box::new(NoopReadSyncer));
+        let mut mkvs = Tree::make()
+            .with_root_type(RootType::IO)
+            .new(Box::new(NoopReadSyncer));
         let untrusted_local = Arc::new(ProtocolUntrustedLocalStorage::new(
             Context::create_child(&ctx),
             protocol.clone(),

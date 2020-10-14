@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/oasisprotocol/oasis-core/go/common"
-	"github.com/oasisprotocol/oasis-core/go/common/crypto/hash"
 	"github.com/oasisprotocol/oasis-core/go/storage/mkvs"
 	"github.com/oasisprotocol/oasis-core/go/storage/mkvs/checkpoint"
 	"github.com/oasisprotocol/oasis-core/go/storage/mkvs/db/api"
@@ -57,6 +56,7 @@ func fillDB(ctx context.Context, require *require.Assertions, values [][]byte, v
 	emptyRoot := node.Root{
 		Namespace: testNs,
 		Version:   version,
+		Type:      node.RootTypeState,
 	}
 	emptyRoot.Hash.Empty()
 
@@ -77,6 +77,7 @@ func fillDB(ctx context.Context, require *require.Assertions, values [][]byte, v
 	return node.Root{
 		Namespace: testNs,
 		Version:   version + 1,
+		Type:      node.RootTypeState,
 		Hash:      hash,
 	}
 }
@@ -229,7 +230,7 @@ func testFinalize(ctx *test) {
 	// This time, all the restored nodes should be present, but the
 	// log keys should be gone.
 	restoreCheckpoint(ctx, ctx.ckMeta, ctx.ckNodes)
-	err := ctx.badgerdb.Finalize(ctx.ctx, ctx.ckMeta.Root.Version, []hash.Hash{ctx.ckMeta.Root.Hash})
+	err := ctx.badgerdb.Finalize(ctx.ctx, []node.Root{ctx.ckMeta.Root})
 	ctx.require.NoError(err, "Finalize()")
 
 	verifyNodes(ctx.require, ctx.badgerdb, ctx.ckNodes)
@@ -256,7 +257,7 @@ func testExistingNodes(ctx *test) {
 
 	// Restore first checkpoint. The database is empty.
 	restoreCheckpoint(ctx, ctx.ckMeta, ctx.ckNodes)
-	err := ctx.badgerdb.Finalize(ctx.ctx, ctx.ckMeta.Root.Version, []hash.Hash{ctx.ckMeta.Root.Hash})
+	err := ctx.badgerdb.Finalize(ctx.ctx, []node.Root{ctx.ckMeta.Root})
 	ctx.require.NoError(err, "Finalize()")
 	verifyNodes(ctx.require, ctx.badgerdb, ctx.ckNodes)
 

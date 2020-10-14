@@ -31,6 +31,7 @@ import (
 	abciState "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/abci/state"
 	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/api"
 	epochtime "github.com/oasisprotocol/oasis-core/go/epochtime/api"
+	storageApi "github.com/oasisprotocol/oasis-core/go/storage/api"
 	"github.com/oasisprotocol/oasis-core/go/storage/mkvs/checkpoint"
 	upgrade "github.com/oasisprotocol/oasis-core/go/upgrade/api"
 )
@@ -995,7 +996,7 @@ func (mux *abciMux) ApplySnapshotChunk(req types.RequestApplySnapshotChunk) type
 
 	// Check if we are done with the restoration. In this case, finalize the root.
 	if done {
-		err = mux.state.storage.NodeDB().Finalize(mux.state.ctx, cp.Root.Version, []hash.Hash{cp.Root.Hash})
+		err = mux.state.storage.NodeDB().Finalize(mux.state.ctx, []storageApi.Root{cp.Root})
 		if err != nil {
 			mux.logger.Error("failed to finalize restored root",
 				"err", err,

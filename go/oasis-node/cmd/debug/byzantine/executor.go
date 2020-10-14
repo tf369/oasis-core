@@ -101,6 +101,7 @@ func (cbc *computeBatchContext) prepareTransactionBatch(
 	emptyRoot := storage.Root{
 		Namespace: lastHeader.Namespace,
 		Version:   lastHeader.Round + 1,
+		Type:      storage.RootTypeIO,
 	}
 	emptyRoot.Hash.Empty()
 
@@ -119,6 +120,7 @@ func (cbc *computeBatchContext) prepareTransactionBatch(
 	}
 	ioReceipts, err := storageBroadcastApply(ctx, clients, &storage.ApplyRequest{
 		Namespace: lastHeader.Namespace,
+		RootType:  storage.RootTypeIO,
 		SrcRound:  lastHeader.Round + 1,
 		SrcRoot:   emptyRoot.Hash,
 		DstRound:  lastHeader.Round + 1,
@@ -182,6 +184,7 @@ func (cbc *computeBatchContext) openTrees(ctx context.Context, rs syncer.ReadSyn
 	cbc.ioTree = transaction.NewTree(rs, storage.Root{
 		Namespace: cbc.bd.Header.Namespace,
 		Version:   cbc.bd.Header.Round + 1,
+		Type:      storage.RootTypeIO,
 		Hash:      cbc.bd.IORoot,
 	})
 
@@ -193,6 +196,7 @@ func (cbc *computeBatchContext) openTrees(ctx context.Context, rs syncer.ReadSyn
 	cbc.stateTree = mkvs.NewWithRoot(rs, nil, storage.Root{
 		Namespace: cbc.bd.Header.Namespace,
 		Version:   cbc.bd.Header.Round,
+		Type:      storage.RootTypeState,
 		Hash:      cbc.bd.Header.StateRoot,
 	})
 
@@ -253,12 +257,14 @@ func (cbc *computeBatchContext) uploadBatch(ctx context.Context, clients []*stor
 	var err error
 	cbc.storageReceipts, err = storageBroadcastApplyBatch(ctx, clients, cbc.bd.Header.Namespace, cbc.bd.Header.Round+1, []storage.ApplyOp{
 		{
+			RootType: storage.RootTypeIO,
 			SrcRound: cbc.bd.Header.Round + 1,
 			SrcRoot:  cbc.bd.IORoot,
 			DstRoot:  cbc.newIORoot,
 			WriteLog: cbc.ioWriteLog,
 		},
 		{
+			RootType: storage.RootTypeState,
 			SrcRound: cbc.bd.Header.Round,
 			SrcRoot:  cbc.bd.Header.StateRoot,
 			DstRoot:  cbc.newStateRoot,

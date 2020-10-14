@@ -14,7 +14,7 @@ func TestOverlay(t *testing.T) {
 	require := require.New(t)
 
 	ctx := context.Background()
-	tree := New(nil, nil)
+	tree := New(nil, nil, node.RootTypeState)
 	defer tree.Close()
 
 	// Insert some items.

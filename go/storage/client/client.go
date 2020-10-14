@@ -77,6 +77,7 @@ func (b *storageClientBackend) writeWithClient(
 	ns common.Namespace,
 	round uint64,
 	fn func(context.Context, api.Backend, *node.Node) (interface{}, error),
+	expectedNewRootTypes []api.RootType,
 	expectedNewRoots []hash.Hash,
 ) ([]*api.Receipt, error) {
 	conns := b.committeeClient.GetConnectionsWithMeta()
@@ -206,11 +207,11 @@ func (b *storageClientBackend) writeWithClient(
 			equal = false
 		}
 		if expectedNewRoots != nil {
-			if len(receiptBody.Roots) != len(expectedNewRoots) {
+			if len(receiptBody.Roots) != len(expectedNewRoots) || len(receiptBody.RootTypes) != len(expectedNewRootTypes) {
 				equal = false
 			} else {
 				for i := range receiptBody.Roots {
-					if receiptBody.Roots[i] != expectedNewRoots[i] {
+					if receiptBody.Roots[i] != expectedNewRoots[i] || receiptBody.RootTypes[i] != expectedNewRootTypes[i] {
 						equal = false
 						break
 					}
@@ -220,7 +221,9 @@ func (b *storageClientBackend) writeWithClient(
 		if !equal {
 			b.logger.Error("obtained root(s) don't equal the expected new root(s)",
 				"node", response.node,
+				"obtainedRootTypes", receiptBody.RootTypes,
 				"obtainedRoots", receiptBody.Roots,
+				"expectedNewRootTypes", expectedNewRootTypes,
 				"expectedNewRoots", expectedNewRoots,
 			)
 			continue
@@ -262,14 +265,17 @@ func (b *storageClientBackend) Apply(ctx context.Context, request *api.ApplyRequ
 		func(ctx context.Context, c api.Backend, node *node.Node) (interface{}, error) {
 			return c.Apply(ctx, request)
 		},
+		[]api.RootType{request.RootType},
 		[]hash.Hash{request.DstRoot},
 	)
 }
 
 func (b *storageClientBackend) ApplyBatch(ctx context.Context, request *api.ApplyBatchRequest) ([]*api.Receipt, error) {
 	expectedNewRoots := make([]hash.Hash, 0, len(request.Ops))
+	expectedNewRootTypes := make([]api.RootType, 0, len(request.Ops))
 	for _, op := range request.Ops {
 		expectedNewRoots = append(expectedNewRoots, op.DstRoot)
+		expectedNewRootTypes = append(expectedNewRootTypes, op.RootType)
 	}
 
 	return b.writeWithClient(
@@ -279,6 +285,7 @@ func (b *storageClientBackend) ApplyBatch(ctx context.Context, request *api.Appl
 		func(ctx context.Context, c api.Backend, node *node.Node) (interface{}, error) {
 			return c.ApplyBatch(ctx, request)
 		},
+		expectedNewRootTypes,
 		expectedNewRoots,
 	)
 }
