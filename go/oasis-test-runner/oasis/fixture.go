@@ -347,6 +347,8 @@ type StorageWorkerFixture struct { // nolint: maligned
 	IgnoreApplies           bool          `json:"ignore_applies,omitempty"`
 	CheckpointSyncEnabled   bool          `json:"checkpoint_sync_enabled,omitempty"`
 
+	CrashPointsProbability float64 `json:"crash_points_probability,omitempty"`
+
 	// Runtimes contains the indexes of the runtimes to enable. Leave
 	// empty or nil for the default behaviour (i.e. include all runtimes).
 	Runtimes []int `json:"runtimes,omitempty"`
@@ -372,9 +374,10 @@ func (f *StorageWorkerFixture) Create(net *Network) (*Storage, error) {
 		SentryIndices:           f.Sentries,
 		CheckpointCheckInterval: f.CheckpointCheckInterval,
 		IgnoreApplies:           f.IgnoreApplies,
-		// The checkpoint syncing flas is intentionally flipped here.
+		// The checkpoint syncing flag is intentionally flipped here.
 		// Syncing should normally be enabled, but normally disabled in tests.
 		CheckpointSyncDisabled: !f.CheckpointSyncEnabled,
+		CrashPointsProbability: f.CrashPointsProbability,
 		DisableCertRotation:    f.DisableCertRotation,
 		Runtimes:               f.Runtimes,
 	})
@@ -393,6 +396,8 @@ type ComputeWorkerFixture struct {
 
 	// Consensus contains configuration for the consensus backend.
 	Consensus ConsensusFixture `json:"consensus"`
+
+	CrashPointsProbability float64 `json:"crash_point_probability"`
 
 	LogWatcherHandlerFactories []log.WatcherHandlerFactory `json:"-"`
 
@@ -415,9 +420,10 @@ func (f *ComputeWorkerFixture) Create(net *Network) (*Compute, error) {
 			LogWatcherHandlerFactories: f.LogWatcherHandlerFactories,
 			Consensus:                  f.Consensus,
 		},
-		Entity:             entity,
-		RuntimeProvisioner: f.RuntimeProvisioner,
-		Runtimes:           f.Runtimes,
+		Entity:                 entity,
+		RuntimeProvisioner:     f.RuntimeProvisioner,
+		CrashPointsProbability: f.CrashPointsProbability,
+		Runtimes:               f.Runtimes,
 	})
 }
 

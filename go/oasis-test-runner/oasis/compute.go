@@ -26,6 +26,8 @@ type Compute struct { // nolint: maligned
 
 	runtimeProvisioner string
 
+	crashPointsProbability float64
+
 	consensusPort uint16
 	clientPort    uint16
 	p2pPort       uint16
@@ -40,6 +42,8 @@ type ComputeCfg struct {
 	Entity *Entity
 
 	RuntimeProvisioner string
+
+	CrashPointsProbability float64
 
 	Runtimes []int
 }
@@ -104,6 +108,7 @@ func (worker *Compute) startNode() error {
 		workerRuntimeProvisioner(worker.runtimeProvisioner).
 		workerRuntimeSGXLoader(worker.net.cfg.RuntimeSGXLoaderBinary).
 		workerExecutorScheduleCheckTxEnabled().
+		configureDebugCrashPoints(worker.crashPointsProbability).
 		appendNetwork(worker.net).
 		appendSeedNodes(worker.net.seeds).
 		appendEntity(worker.entity)
@@ -160,12 +165,13 @@ func (net *Network) NewCompute(cfg *ComputeCfg) (*Compute, error) {
 			consensus:                                cfg.Consensus,
 			noAutoStart:                              cfg.NoAutoStart,
 		},
-		entity:             cfg.Entity,
-		runtimeProvisioner: cfg.RuntimeProvisioner,
-		consensusPort:      net.nextNodePort,
-		clientPort:         net.nextNodePort + 1,
-		p2pPort:            net.nextNodePort + 2,
-		runtimes:           cfg.Runtimes,
+		entity:                 cfg.Entity,
+		runtimeProvisioner:     cfg.RuntimeProvisioner,
+		crashPointsProbability: cfg.CrashPointsProbability,
+		consensusPort:          net.nextNodePort,
+		clientPort:             net.nextNodePort + 1,
+		p2pPort:                net.nextNodePort + 2,
+		runtimes:               cfg.Runtimes,
 	}
 	worker.doStartNode = worker.startNode
 	copy(worker.NodeID[:], nodeKey[:])

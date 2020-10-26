@@ -27,6 +27,7 @@ type Storage struct { // nolint: maligned
 	ignoreApplies           bool
 	checkpointSyncDisabled  bool
 	checkpointCheckInterval time.Duration
+	crashPointsProbability  float64
 
 	sentryPubKey  signature.PublicKey
 	tmAddress     string
@@ -49,6 +50,8 @@ type StorageCfg struct { // nolint: maligned
 	IgnoreApplies           bool
 	CheckpointSyncDisabled  bool
 	CheckpointCheckInterval time.Duration
+
+	CrashPointsProbability float64
 
 	Runtimes []int
 }
@@ -121,6 +124,7 @@ func (worker *Storage) startNode() error {
 		workerStorageDebugIgnoreApplies(worker.ignoreApplies).
 		workerStorageDebugDisableCheckpointSync(worker.checkpointSyncDisabled).
 		workerStorageCheckpointCheckInterval(worker.checkpointCheckInterval).
+		configureDebugCrashPoints(worker.crashPointsProbability).
 		appendNetwork(worker.net).
 		appendEntity(worker.entity)
 
@@ -202,6 +206,7 @@ func (net *Network) NewStorage(cfg *StorageCfg) (*Storage, error) {
 		disableCertRotation:     cfg.DisableCertRotation,
 		ignoreApplies:           cfg.IgnoreApplies,
 		checkpointSyncDisabled:  cfg.CheckpointSyncDisabled,
+		crashPointsProbability:  cfg.CrashPointsProbability,
 		checkpointCheckInterval: cfg.CheckpointCheckInterval,
 		sentryPubKey:            sentryPubKey,
 		tmAddress:               crypto.PublicKeyToTendermint(&p2pKey).Address().String(),
