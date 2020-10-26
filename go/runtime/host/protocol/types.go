@@ -195,6 +195,8 @@ type ComputedBatch struct {
 	// If this runtime uses a TEE, then this is the signature of Header with
 	// node's RAK for this runtime.
 	RakSig signature.RawSignature `json:"rak_sig"`
+	// Messages are the emitted runtime messages.
+	Messages []roothash.Message `json:"messages"`
 }
 
 // String returns a string representation of a computed batch.

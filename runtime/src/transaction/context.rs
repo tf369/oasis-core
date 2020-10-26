@@ -24,7 +24,7 @@ pub struct Context<'a> {
     /// List of emitted tags for each transaction.
     tags: Vec<Tags>,
 
-    /// List of messages emitted.
+    /// List of emitted messages.
     messages: Vec<Message>,
 }
 
@@ -77,9 +77,12 @@ impl<'a> Context<'a> {
             .push(Tag::new(key.as_ref().to_vec(), value.as_ref().to_vec()))
     }
 
-    /// Send a roothash message as part of the block that contains this transaction.
-    /// See RFC 0065 for information on roothash messages.
-    pub fn send_roothash_message(&mut self, message: Message) {
+    /// Emit a message as part of the current round.
+    ///
+    /// Returns the index of the emitted message which is needed to check for the result of the
+    /// emitted message in the next round.
+    pub fn emit_message(&mut self, message: Message) -> u32 {
         self.messages.push(message);
+        self.messages.len() as u32
     }
 }

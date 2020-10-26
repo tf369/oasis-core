@@ -442,7 +442,7 @@ func (sc *serviceClient) DeliverEvent(ctx context.Context, height int64, tx tmty
 
 	for _, ev := range events {
 		// Notify non-finalized events.
-		if ev.FinalizedEvent == nil {
+		if ev.Finalized == nil {
 			notifiers := sc.getRuntimeNotifiers(ev.RuntimeID)
 			notifiers.eventNotifier.Broadcast(ev)
 			continue
@@ -452,7 +452,7 @@ func (sc *serviceClient) DeliverEvent(ctx context.Context, height int64, tx tmty
 		if sc.trackedRuntime[ev.RuntimeID] == nil {
 			continue
 		}
-		if err = sc.processFinalizedEvent(ctx, height, ev.RuntimeID, &ev.FinalizedEvent.Round, true); err != nil {
+		if err = sc.processFinalizedEvent(ctx, height, ev.RuntimeID, &ev.Finalized.Round, true); err != nil {
 			return fmt.Errorf("roothash: failed to process finalized event: %w", err)
 		}
 	}
@@ -601,7 +601,7 @@ func EventsFromTendermint(
 					continue
 				}
 
-				ev := &api.Event{RuntimeID: value.ID, Height: height, TxHash: txHash, FinalizedEvent: &api.FinalizedEvent{Round: value.Round}}
+				ev := &api.Event{RuntimeID: value.ID, Height: height, TxHash: txHash, Finalized: &api.FinalizedEvent{Round: value.Round}}
 				events = append(events, ev)
 			case bytes.Equal(key, app.KeyExecutionDiscrepancyDetected):
 				// An execution discrepancy has been detected.
@@ -622,6 +622,16 @@ func EventsFromTendermint(
 				}
 
 				ev := &api.Event{RuntimeID: value.ID, Height: height, TxHash: txHash, ExecutorCommitted: &value.Event}
+				events = append(events, ev)
+			case bytes.Equal(key, app.KeyMessage):
+				// Runtime message has been processed.
+				var value app.ValueMessage
+				if err := cbor.Unmarshal(val, &value); err != nil {
+					errs = multierror.Append(errs, fmt.Errorf("roothash: corrupt message event: %w", err))
+					continue
+				}
+
+				ev := &api.Event{RuntimeID: value.ID, Height: height, TxHash: txHash, Message: &value.Event}
 				events = append(events, ev)
 			case bytes.Equal(key, app.KeyRuntimeID):
 				// Runtime ID attribute (Base64-encoded to allow queries).

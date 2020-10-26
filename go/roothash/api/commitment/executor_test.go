@@ -7,6 +7,7 @@ import (
 
 	"github.com/oasisprotocol/oasis-core/go/common/crypto/hash"
 	"github.com/oasisprotocol/oasis-core/go/common/crypto/signature"
+	"github.com/oasisprotocol/oasis-core/go/roothash/api/block"
 )
 
 func TestConsistentHash(t *testing.T) {
@@ -15,22 +16,22 @@ func TestConsistentHash(t *testing.T) {
 	_ = emptyHeaderHash.UnmarshalHex("57d73e02609a00fcf4ca43cbf8c9f12867c46942d246fb2b0bce42cbdb8db844")
 
 	var empty ComputeResultsHeader
-	require.EqualValues(t, emptyHeaderHash, empty.EncodedHash())
+	require.EqualValues(t, emptyHeaderHash.String(), empty.EncodedHash().String())
 
 	var emptyRoot hash.Hash
 	emptyRoot.Empty()
 
 	var populatedHeaderHash hash.Hash
-	_ = populatedHeaderHash.UnmarshalHex("374021bcba44f1014d0d9919e876a1ecd7fe5ec1a92ecf9c8b313cd4976fbc01")
+	_ = populatedHeaderHash.UnmarshalHex("430ff02fafc53fc0e5eb432ad3e8b09167842a3948e09a7ee4bdd88e83e01d5a")
 
 	populated := ComputeResultsHeader{
 		Round:        42,
 		PreviousHash: emptyHeaderHash,
 		IORoot:       &emptyRoot,
 		StateRoot:    &emptyRoot,
-		Messages:     nil,
+		MessagesHash: &emptyRoot,
 	}
-	require.EqualValues(t, populatedHeaderHash, populated.EncodedHash())
+	require.EqualValues(t, populatedHeaderHash.String(), populated.EncodedHash().String())
 }
 
 func TestValidateBasic(t *testing.T) {
@@ -46,12 +47,13 @@ func TestValidateBasic(t *testing.T) {
 			PreviousHash: emptyHeaderHash,
 			IORoot:       &emptyRoot,
 			StateRoot:    &emptyRoot,
-			Messages:     nil,
+			MessagesHash: &emptyRoot,
 		},
 		TxnSchedSig:       signature.Signature{},
 		InputRoot:         emptyRoot,
 		StorageSignatures: []signature.Signature{{}},
 		RakSig:            &signature.RawSignature{},
+		Messages:          nil,
 	}
 
 	for _, tc := range []struct {
@@ -76,6 +78,24 @@ func TestValidateBasic(t *testing.T) {
 			"Bad StateRoot",
 			func(b ComputeBody) ComputeBody {
 				b.Header.StateRoot = nil
+				return b
+			},
+			true,
+		},
+		{
+			"Bad MessagesHash",
+			func(b ComputeBody) ComputeBody {
+				b.Header.MessagesHash = nil
+				return b
+			},
+			true,
+		},
+		{
+			"Bad runtime messages",
+			func(b ComputeBody) ComputeBody {
+				b.Messages = []block.Message{
+					{}, // A message without any variant is invalid.
+				}
 				return b
 			},
 			true,

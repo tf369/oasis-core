@@ -1094,6 +1094,10 @@ func (n *Node) proposeBatchLocked(processedBatch *processedBatch) {
 		InputRoot:        state.batch.ioRoot.Hash,
 		InputStorageSigs: state.batch.storageSignatures,
 	}
+	// If we are the transaction scheduler also include all the emitted messages.
+	if epoch.IsTransactionScheduler(n.commonNode.CurrentBlock.Header.Round) {
+		proposedResults.Messages = batch.Messages
+	}
 
 	// Commit I/O and state write logs to storage.
 	start := time.Now()

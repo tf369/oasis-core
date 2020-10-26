@@ -152,10 +152,11 @@ func TestPoolSingleCommitment(t *testing.T) {
 	pool := Pool{
 		Runtime:   rt,
 		Committee: committee,
+		Round:     0,
 	}
 
 	// Generate a commitment.
-	childBlk, parentBlk, body := generateComputeBody(t)
+	childBlk, parentBlk, body := generateComputeBody(t, pool.Round)
 
 	sv := &staticSignatureVerifier{
 		storagePublicKey:      body.StorageSignatures[0].PublicKey,
@@ -178,6 +179,7 @@ func TestPoolSingleCommitment(t *testing.T) {
 		{"StorageSigs1", func(b *ComputeBody) { b.StorageSignatures = nil }, ErrBadStorageReceipts},
 		{"MissingIORootHash", func(b *ComputeBody) { b.Header.IORoot = nil }, ErrBadExecutorCommitment},
 		{"MissingStateRootHash", func(b *ComputeBody) { b.Header.StateRoot = nil }, ErrBadExecutorCommitment},
+		{"MissingMessagesHash", func(b *ComputeBody) { b.Header.MessagesHash = nil }, ErrBadExecutorCommitment},
 		{"FailureIndicatingWithStorageSigs", func(b *ComputeBody) { b.Failure = FailureStorageUnavailable }, ErrBadExecutorCommitment},
 		{"FailureIndicatingWithStateRootHash", func(b *ComputeBody) {
 			b.Failure = FailureStorageUnavailable
@@ -189,8 +191,13 @@ func TestPoolSingleCommitment(t *testing.T) {
 			b.StorageSignatures = nil
 			b.Header.IORoot = nil
 		}, ErrBadExecutorCommitment},
+		{"InvalidRuntimeMessages", func(b *ComputeBody) {
+			b.Messages = []block.Message{
+				{}, // A message without any variant is invalid.
+			}
+		}, ErrBadExecutorCommitment},
 	} {
-		_, _, invalidBody := generateComputeBody(t)
+		_, _, invalidBody := generateComputeBody(t, pool.Round)
 		invalidBody.StorageSignatures = append([]signature.Signature{}, body.StorageSignatures...)
 		invalidBody.TxnSchedSig = body.TxnSchedSig
 
@@ -215,7 +222,7 @@ func TestPoolSingleCommitment(t *testing.T) {
 	require.Equal(t, ErrStillWaiting, err, "CheckEnoughCommitments")
 	err = pool.CheckEnoughCommitments(true)
 	require.Error(t, err, "CheckEnoughCommitments")
-	require.Equal(t, ErrStillWaiting, err, "CheckEnoughCommitments")
+	require.Equal(t, ErrNoProposerCommitment, err, "CheckEnoughCommitments")
 
 	// Adding a commitment having a storage receipt signed with an incorrect
 	// public key should fail.
@@ -262,7 +269,7 @@ func TestPoolSingleCommitment(t *testing.T) {
 	dc, err := pool.DetectDiscrepancy()
 	require.NoError(t, err, "DetectDiscrepancy")
 	require.Equal(t, false, pool.Discrepancy)
-	header := dc.ToDDResult().(ComputeResultsHeader)
+	header := dc.ToDDResult().(*ComputeBody).Header
 	require.EqualValues(t, &body.Header, &header, "DD should return the same header")
 }
 
@@ -303,6 +310,7 @@ func TestPoolSingleCommitmentTEE(t *testing.T) {
 	pool := Pool{
 		Runtime:   rt,
 		Committee: committee,
+		Round:     0,
 	}
 
 	nl := &staticNodeLookup{
@@ -319,7 +327,7 @@ func TestPoolSingleCommitmentTEE(t *testing.T) {
 	}
 
 	// Generate a commitment.
-	childBlk, _, body := generateComputeBody(t)
+	childBlk, _, body := generateComputeBody(t, pool.Round)
 	rakSig, err := signature.Sign(skRAK, ComputeResultsHeaderSignatureContext, cbor.Marshal(body.Header))
 	require.NoError(t, err, "Sign")
 	body.RakSig = &rakSig.Signature
@@ -333,7 +341,7 @@ func TestPoolSingleCommitmentTEE(t *testing.T) {
 	require.Equal(t, ErrStillWaiting, err, "CheckEnoughCommitments")
 	err = pool.CheckEnoughCommitments(true)
 	require.Error(t, err, "CheckEnoughCommitments")
-	require.Equal(t, ErrStillWaiting, err, "CheckEnoughCommitments")
+	require.Equal(t, ErrNoProposerCommitment, err, "CheckEnoughCommitments")
 
 	// Adding a commitment should succeed.
 	err = pool.AddExecutorCommitment(context.Background(), childBlk, nopSV, nl, commit)
@@ -351,14 +359,113 @@ func TestPoolSingleCommitmentTEE(t *testing.T) {
 	dc, err := pool.DetectDiscrepancy()
 	require.NoError(t, err, "DetectDiscrepancy")
 	require.Equal(t, false, pool.Discrepancy)
-	header := dc.ToDDResult().(ComputeResultsHeader)
+	header := dc.ToDDResult().(*ComputeBody).Header
 	require.EqualValues(t, &body.Header, &header, "DD should return the same header")
+}
+
+func TestPoolStragglers(t *testing.T) {
+	genesisTestHelpers.SetTestChainContext()
+
+	rt, sks, committee, nl := generateMockCommittee(t, &registry.Runtime{
+		Kind:        registry.KindCompute,
+		TEEHardware: node.TEEHardwareInvalid,
+		Storage: registry.StorageParameters{
+			GroupSize:           1,
+			MinWriteReplication: 1,
+		},
+		Executor: registry.ExecutorParameters{
+			GroupSize:         2,
+			GroupBackupSize:   1,
+			AllowedStragglers: 1,
+		},
+	})
+	sk1 := sks[0]
+	sk2 := sks[1]
+
+	t.Run("NonTxnSchedulerFirst", func(t *testing.T) {
+		// Create a pool.
+		pool := Pool{
+			Runtime:   rt,
+			Committee: committee,
+			Round:     0,
+		}
+
+		// Generate a commitment.
+		childBlk, _, body := generateComputeBody(t, pool.Round)
+
+		commit1, err := SignExecutorCommitment(sk1, &body)
+		require.NoError(t, err, "SignExecutorCommitment")
+
+		commit2, err := SignExecutorCommitment(sk2, &body)
+		require.NoError(t, err, "SignExecutorCommitment")
+
+		// Add second commitment first as that one is not from the transaction scheduler.
+		err = pool.AddExecutorCommitment(context.Background(), childBlk, nopSV, nl, commit2)
+		require.NoError(t, err, "AddExecutorCommitment")
+
+		// There should not be enough executor commitments.
+		err = pool.CheckEnoughCommitments(false)
+		require.Error(t, err, "CheckEnoughCommitments")
+		require.Equal(t, ErrStillWaiting, err, "CheckEnoughCommitments")
+		err = pool.CheckEnoughCommitments(true)
+		require.Error(t, err, "CheckEnoughCommitments")
+		require.Equal(t, ErrNoProposerCommitment, err, "CheckEnoughCommitments")
+
+		// Adding commitment 1 should succeed.
+		err = pool.AddExecutorCommitment(context.Background(), childBlk, nopSV, nl, commit1)
+		require.NoError(t, err, "AddExecutorCommitment")
+
+		// There should be enough executor commitments.
+		err = pool.CheckEnoughCommitments(false)
+		require.NoError(t, err, "CheckEnoughCommitments")
+
+		// There should be no discrepancy.
+		dc, err := pool.DetectDiscrepancy()
+		require.NoError(t, err, "DetectDiscrepancy")
+		require.Equal(t, false, pool.Discrepancy)
+		header := dc.ToDDResult().(*ComputeBody).Header
+		require.EqualValues(t, &body.Header, &header, "DD should return the same header")
+	})
+
+	t.Run("TxnSchedulerFirst", func(t *testing.T) {
+		// Create a pool.
+		pool := Pool{
+			Runtime:   rt,
+			Committee: committee,
+			Round:     0,
+		}
+
+		// Generate a commitment.
+		childBlk, _, body := generateComputeBody(t, pool.Round)
+
+		commit1, err := SignExecutorCommitment(sk1, &body)
+		require.NoError(t, err, "SignExecutorCommitment")
+
+		// Add first commitment first as that one is from the transaction scheduler.
+		err = pool.AddExecutorCommitment(context.Background(), childBlk, nopSV, nl, commit1)
+		require.NoError(t, err, "AddExecutorCommitment")
+
+		// There should not be enough executor commitments pre-timeout.
+		err = pool.CheckEnoughCommitments(false)
+		require.Error(t, err, "CheckEnoughCommitments")
+		require.Equal(t, ErrStillWaiting, err, "CheckEnoughCommitments")
+		// There should be enough executor commitments after timeout (due to allowed stragglers).
+		err = pool.CheckEnoughCommitments(true)
+		require.NoError(t, err, "CheckEnoughCommitments")
+
+		// There should be no discrepancy.
+		dc, err := pool.DetectDiscrepancy()
+		require.NoError(t, err, "DetectDiscrepancy")
+		require.Equal(t, false, pool.Discrepancy)
+		header := dc.ToDDResult().(*ComputeBody).Header
+		require.EqualValues(t, &body.Header, &header, "DD should return the same header")
+	})
 }
 
 func TestPoolTwoCommitments(t *testing.T) {
 	genesisTestHelpers.SetTestChainContext()
 
-	rt, sks, committee, nl := generateMockCommittee(t)
+	rt, sks, committee, nl := generateMockCommittee(t, nil)
 	sk1 := sks[0]
 	sk2 := sks[1]
 	sk3 := sks[2]
@@ -368,10 +475,11 @@ func TestPoolTwoCommitments(t *testing.T) {
 		pool := Pool{
 			Runtime:   rt,
 			Committee: committee,
+			Round:     0,
 		}
 
 		// Generate a commitment.
-		childBlk, _, body := generateComputeBody(t)
+		childBlk, _, body := generateComputeBody(t, pool.Round)
 
 		commit1, err := SignExecutorCommitment(sk1, &body)
 		require.NoError(t, err, "SignExecutorCommitment")
@@ -403,7 +511,7 @@ func TestPoolTwoCommitments(t *testing.T) {
 		dc, err := pool.DetectDiscrepancy()
 		require.NoError(t, err, "DetectDiscrepancy")
 		require.Equal(t, false, pool.Discrepancy)
-		header := dc.ToDDResult().(ComputeResultsHeader)
+		header := dc.ToDDResult().(*ComputeBody).Header
 		require.EqualValues(t, &body.Header, &header, "DD should return the same header")
 	})
 
@@ -425,7 +533,7 @@ func TestPoolTwoCommitments(t *testing.T) {
 		dc, err := pool.ResolveDiscrepancy()
 		require.NoError(t, err, "ResolveDiscrepancy")
 		require.Equal(t, true, pool.Discrepancy)
-		header := dc.ToDDResult().(ComputeResultsHeader)
+		header := dc.ToDDResult().(*ComputeBody).Header
 		require.EqualValues(t, &correctBody.Header, &header, "DR should return the same header")
 	})
 
@@ -441,7 +549,7 @@ func TestPoolTwoCommitments(t *testing.T) {
 }
 
 func TestPoolFailureIndicatingCommitment(t *testing.T) {
-	rt, sks, committee, nl := generateMockCommittee(t)
+	rt, sks, committee, nl := generateMockCommittee(t, nil)
 	sk1 := sks[0]
 	sk2 := sks[1]
 	sk3 := sks[2]
@@ -453,10 +561,11 @@ func TestPoolFailureIndicatingCommitment(t *testing.T) {
 		pool := Pool{
 			Runtime:   rt,
 			Committee: committee,
+			Round:     0,
 		}
 
 		// Generate a compute body.
-		childBlk, _, body := generateComputeBody(t)
+		childBlk, _, body := generateComputeBody(t, pool.Round)
 
 		// Generate a valid commitment.
 		commit1, err := SignExecutorCommitment(sk1, &body)
@@ -482,7 +591,7 @@ func TestPoolFailureIndicatingCommitment(t *testing.T) {
 		require.Equal(t, ErrStillWaiting, err, "CheckEnoughCommitments")
 		err = pool.CheckEnoughCommitments(true)
 		require.Error(t, err, "CheckEnoughCommitments")
-		require.Equal(t, ErrStillWaiting, err, "CheckEnoughCommitments")
+		require.Equal(t, ErrNoProposerCommitment, err, "CheckEnoughCommitments")
 
 		// Adding a commitment should succeed.
 		err = pool.AddExecutorCommitment(context.Background(), childBlk, nopSV, nl, commit1)
@@ -527,7 +636,7 @@ func TestPoolFailureIndicatingCommitment(t *testing.T) {
 		dc, err := pool.ResolveDiscrepancy()
 		require.NoError(t, err, "ResolveDiscrepancy")
 		require.Equal(t, true, pool.Discrepancy)
-		header := dc.ToDDResult().(ComputeResultsHeader)
+		header := dc.ToDDResult().(*ComputeBody).Header
 		require.EqualValues(t, &body.Header, &header, "DR should return the same header")
 	})
 
@@ -583,6 +692,7 @@ func TestPoolSerialization(t *testing.T) {
 	pool := Pool{
 		Runtime:   rt,
 		Committee: committee,
+		Round:     0,
 	}
 
 	nl := &staticNodeLookup{
@@ -592,7 +702,7 @@ func TestPoolSerialization(t *testing.T) {
 	}
 
 	// Generate a commitment.
-	childBlk, _, body := generateComputeBody(t)
+	childBlk, _, body := generateComputeBody(t, pool.Round)
 
 	commit, err := SignExecutorCommitment(sk, &body)
 	require.NoError(t, err, "SignExecutorCommitment")
@@ -614,14 +724,14 @@ func TestPoolSerialization(t *testing.T) {
 	dc, err := pool.DetectDiscrepancy()
 	require.NoError(t, err, "DetectDiscrepancy")
 	require.Equal(t, false, pool.Discrepancy)
-	header := dc.ToDDResult().(ComputeResultsHeader)
+	header := dc.ToDDResult().(*ComputeBody).Header
 	require.EqualValues(t, &body.Header, &header, "DD should return the same header")
 }
 
 func TestTryFinalize(t *testing.T) {
 	genesisTestHelpers.SetTestChainContext()
 
-	rt, sks, committee, nl := generateMockCommittee(t)
+	rt, sks, committee, nl := generateMockCommittee(t, nil)
 	sk1 := sks[0]
 	sk2 := sks[1]
 	sk3 := sks[2]
@@ -634,10 +744,11 @@ func TestTryFinalize(t *testing.T) {
 		pool := Pool{
 			Runtime:   rt,
 			Committee: committee,
+			Round:     0,
 		}
 
 		// Generate a commitment.
-		childBlk, _, body := generateComputeBody(t)
+		childBlk, _, body := generateComputeBody(t, pool.Round)
 
 		commit1, err := SignExecutorCommitment(sk1, &body)
 		require.NoError(t, err, "SignExecutorCommitment")
@@ -660,7 +771,7 @@ func TestTryFinalize(t *testing.T) {
 
 		dc, err := pool.TryFinalize(now, roundTimeout, false, true)
 		require.NoError(t, err, "TryFinalize")
-		header := dc.ToDDResult().(ComputeResultsHeader)
+		header := dc.ToDDResult().(*ComputeBody).Header
 		require.EqualValues(t, &body.Header, &header, "DD should return the same header")
 		require.EqualValues(t, TimeoutNever, pool.NextTimeout, "NextTimeout should be TimeoutNever")
 	})
@@ -677,7 +788,7 @@ func TestTryFinalize(t *testing.T) {
 
 		dc, err := pool.TryFinalize(now, roundTimeout, false, true)
 		require.NoError(t, err, "TryFinalize")
-		header := dc.ToDDResult().(ComputeResultsHeader)
+		header := dc.ToDDResult().(*ComputeBody).Header
 		require.EqualValues(t, &correctBody.Header, &header, "DR should return the same header")
 		require.EqualValues(t, TimeoutNever, pool.NextTimeout, "NextTimeout should be TimeoutNever")
 	})
@@ -687,10 +798,11 @@ func TestTryFinalize(t *testing.T) {
 		pool := Pool{
 			Runtime:   rt,
 			Committee: committee,
+			Round:     0,
 		}
 
 		// Generate a commitment.
-		childBlk, _, body := generateComputeBody(t)
+		childBlk, _, body := generateComputeBody(t, pool.Round)
 
 		commit1, err := SignExecutorCommitment(sk1, &body)
 		require.NoError(t, err, "SignExecutorCommitment")
@@ -738,7 +850,7 @@ func TestTryFinalize(t *testing.T) {
 
 		dc, err := pool.TryFinalize(now, roundTimeout, false, true)
 		require.NoError(t, err, "TryFinalize")
-		header := dc.ToDDResult().(ComputeResultsHeader)
+		header := dc.ToDDResult().(*ComputeBody).Header
 		require.EqualValues(t, &correctHeader, &header, "DR should return the same header")
 		require.EqualValues(t, TimeoutNever, pool.NextTimeout, "NextTimeout should be TimeoutNever")
 	})
@@ -747,7 +859,7 @@ func TestTryFinalize(t *testing.T) {
 func TestExecutorTimeoutRequest(t *testing.T) {
 	genesisTestHelpers.SetTestChainContext()
 
-	rt, sks, committee, nl := generateMockCommittee(t)
+	rt, sks, committee, nl := generateMockCommittee(t, nil)
 	sk1 := sks[0]
 	sk2 := sks[1]
 
@@ -759,6 +871,7 @@ func TestExecutorTimeoutRequest(t *testing.T) {
 		pool := Pool{
 			Runtime:   rt,
 			Committee: committee,
+			Round:     0,
 		}
 
 		var id common.Namespace
@@ -799,7 +912,7 @@ func TestExecutorTimeoutRequest(t *testing.T) {
 		}
 
 		// Generate a commitment.
-		childBlk, _, body := generateComputeBody(t)
+		childBlk, _, body := generateComputeBody(t, pool.Round)
 		commit1, err := SignExecutorCommitment(sk1, &body)
 		require.NoError(err, "SignExecutorCommitment")
 		// Adding commitment 1 should succeed.
@@ -813,26 +926,33 @@ func TestExecutorTimeoutRequest(t *testing.T) {
 	})
 }
 
-func generateMockCommittee(t *testing.T) (
+func generateMockCommittee(t *testing.T, rtTemplate *registry.Runtime) (
 	rt *registry.Runtime,
 	sks []signature.Signer,
 	committee *scheduler.Committee,
 	nl NodeLookup,
 ) {
-	// Generate a non-TEE runtime.
-	var rtID common.Namespace
-	_ = rtID.UnmarshalHex("0000000000000000000000000000000000000000000000000000000000000000")
-
-	rt = &registry.Runtime{
-		Versioned:   cbor.NewVersioned(registry.LatestRuntimeDescriptorVersion),
-		ID:          rtID,
-		Kind:        registry.KindCompute,
-		TEEHardware: node.TEEHardwareInvalid,
-		Storage: registry.StorageParameters{
-			GroupSize:           1,
-			MinWriteReplication: 1,
-		},
+	switch rtTemplate {
+	case nil:
+		// Generate a defauolt.
+		rt = &registry.Runtime{
+			Kind:        registry.KindCompute,
+			TEEHardware: node.TEEHardwareInvalid,
+			Storage: registry.StorageParameters{
+				GroupSize:           1,
+				MinWriteReplication: 1,
+			},
+			Executor: registry.ExecutorParameters{
+				GroupSize:       2,
+				GroupBackupSize: 1,
+			},
+		}
+	default:
+		// Use the provided runtime descriptor template.
+		rt = rtTemplate
 	}
+	rt.Versioned = cbor.NewVersioned(registry.LatestRuntimeDescriptorVersion)
+	_ = rt.ID.UnmarshalHex("0000000000000000000000000000000000000000000000000000000000000000")
 
 	// Generate commitment signing keys.
 	sk1, err := memorySigner.NewSigner(rand.Reader)
@@ -863,17 +983,20 @@ func generateMockCommittee(t *testing.T) (
 	}
 	nl = &staticNodeLookup{
 		runtime: &node.Runtime{
-			ID: rtID,
+			ID: rt.ID,
 		},
 	}
 
 	return
 }
 
-func generateComputeBody(t *testing.T) (*block.Block, *block.Block, ComputeBody) {
+func generateComputeBody(t *testing.T, round uint64) (*block.Block, *block.Block, ComputeBody) {
 	var id common.Namespace
-	childBlk := block.NewGenesisBlock(id, 0)
+	childBlk := block.NewGenesisBlock(id, round)
 	parentBlk := block.NewEmptyBlock(childBlk, 1, block.Normal)
+
+	// TODO: Add tests with some emitted messages.
+	msgsHash := block.MessagesHash(nil)
 
 	body := ComputeBody{
 		Header: ComputeResultsHeader{
@@ -881,6 +1004,7 @@ func generateComputeBody(t *testing.T) (*block.Block, *block.Block, ComputeBody)
 			PreviousHash: parentBlk.Header.PreviousHash,
 			IORoot:       &parentBlk.Header.IORoot,
 			StateRoot:    &parentBlk.Header.StateRoot,
+			MessagesHash: &msgsHash,
 		},
 	}
 
@@ -941,10 +1065,11 @@ func setupDiscrepancy(
 	pool := Pool{
 		Runtime:   rt,
 		Committee: committee,
+		Round:     0,
 	}
 
 	// Generate a commitment.
-	childBlk, parentBlk, body := generateComputeBody(t)
+	childBlk, parentBlk, body := generateComputeBody(t, pool.Round)
 
 	commit1, err := SignExecutorCommitment(sk1, &body)
 	require.NoError(t, err, "SignExecutorCommitment")

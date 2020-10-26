@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use byteorder::{BigEndian, WriteBytesExt};
 use io_context::Context as IoContext;
 
 use oasis_core_keymanager_client::{KeyManagerClient, KeyPairId};
@@ -10,6 +11,8 @@ use oasis_core_runtime::{
             hash::Hash,
             mrae::deoxysii::{DeoxysII, KEY_SIZE, NONCE_SIZE, TAG_SIZE},
         },
+        key_format::KeyFormat,
+        roothash::Message,
         runtime::RuntimeId,
         version::Version,
     },
@@ -23,6 +26,32 @@ use oasis_core_runtime::{
 use simple_keymanager::trusted_policy_signers;
 use simple_keyvalue_api::{with_api, Key, KeyValue};
 
+/// Key format used for transaction artifacts.
+#[derive(Debug)]
+struct PendingMessagesKeyFormat {
+    index: u32,
+}
+
+impl KeyFormat for PendingMessagesKeyFormat {
+    fn prefix() -> u8 {
+        0x00
+    }
+
+    fn size() -> usize {
+        4
+    }
+
+    fn encode_atoms(self, atoms: &mut Vec<Vec<u8>>) {
+        let mut index: Vec<u8> = Vec::with_capacity(4);
+        index.write_u32::<BigEndian>(self.index).unwrap();
+        atoms.push(index);
+    }
+
+    fn decode_atoms(_data: &[u8]) -> Self {
+        unimplemented!()
+    }
+}
+
 struct Context {
     test_runtime_id: RuntimeId,
     km_client: Arc<dyn KeyManagerClient>,
@@ -33,6 +62,21 @@ fn get_runtime_id(_args: &(), ctx: &mut TxnContext) -> Result<Option<String>> {
     let rctx = runtime_context!(ctx, Context);
 
     Ok(Some(rctx.test_runtime_id.to_string()))
+}
+
+// Emit a message and schedule to check its result in the next round.
+fn message(_args: &u64, ctx: &mut TxnContext) -> Result<()> {
+    StorageContext::with_current(|mkvs, _untrusted_local| {
+        // Emit a message.
+        let index = ctx.emit_message(Message::Noop {});
+
+        mkvs.insert(
+            IoContext::create_child(&ctx.io_ctx),
+            &PendingMessagesKeyFormat { index }.encode(),
+            b"noop", // Value is ignored.
+        );
+    });
+    Ok(())
 }
 
 /// Insert a key/value pair.

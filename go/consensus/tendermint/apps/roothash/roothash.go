@@ -3,7 +3,6 @@ package roothash
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 
 	"github.com/tendermint/tendermint/abci/types"
@@ -33,6 +32,7 @@ var _ tmapi.Application = (*rootHashApplication)(nil)
 
 type rootHashApplication struct {
 	state tmapi.ApplicationState
+	md    tmapi.MessageDispatcher
 }
 
 func (app *rootHashApplication) Name() string {
@@ -57,6 +57,7 @@ func (app *rootHashApplication) Dependencies() []string {
 
 func (app *rootHashApplication) OnRegister(state tmapi.ApplicationState, md tmapi.MessageDispatcher) {
 	app.state = state
+	app.md = md
 }
 
 func (app *rootHashApplication) OnCleanup() {
@@ -161,6 +162,7 @@ func (app *rootHashApplication) onCommitteeChanged(ctx *tmapi.Context, epoch epo
 
 			// Set the executor pool.
 			rtState.ExecutorPool = executorPool
+			rtState.ExecutorPool.Round = rtState.CurrentBlock.Header.Round
 		}
 
 		// Update the runtime descriptor to the latest per-epoch value.
@@ -247,7 +249,7 @@ func (app *rootHashApplication) emitEmptyBlock(ctx *tmapi.Context, runtime *root
 				return fmt.Errorf("failed to clear round timeout: %w", err)
 			}
 		}
-		runtime.ExecutorPool.ResetCommitments()
+		runtime.ExecutorPool.ResetCommitments(blk.Header.Round)
 	}
 
 	tagV := ValueFinalized{
@@ -263,7 +265,13 @@ func (app *rootHashApplication) emitEmptyBlock(ctx *tmapi.Context, runtime *root
 }
 
 func (app *rootHashApplication) ExecuteMessage(ctx *tmapi.Context, msg interface{}) error {
-	return roothash.ErrInvalidArgument
+	switch msg.(type) {
+	case *block.NoopMessage:
+		// Noop message always succeeds.
+		return nil
+	default:
+		return roothash.ErrInvalidArgument
+	}
 }
 
 func (app *rootHashApplication) ExecuteTx(ctx *tmapi.Context, tx *transaction.Transaction) error {
@@ -442,41 +450,61 @@ func (app *rootHashApplication) tryFinalizeExecutorCommits(
 	ctx *tmapi.Context,
 	rtState *roothashState.RuntimeState,
 	forced bool,
-) (*block.Block, error) {
+) error {
 	runtime := rtState.Runtime
-	blockNr := rtState.CurrentBlock.Header.Round
+	round := rtState.CurrentBlock.Header.Round
 
 	commit, err := rtState.ExecutorPool.TryFinalize(ctx.BlockHeight(), runtime.Executor.RoundTimeout, forced, true)
 	switch err {
 	case nil:
 		// Round has been finalized.
 		ctx.Logger().Debug("finalized round",
-			"round", blockNr,
+			"round", round,
 		)
 
-		// Generate the final block.
-		hdr := commit.ToDDResult().(commitment.ComputeResultsHeader)
+		body := commit.ToDDResult().(*commitment.ComputeBody)
+		hdr := &body.Header
 
+		// Process any runtime messages.
+		if err = app.processRuntimeMessages(ctx, rtState, body.Messages); err != nil {
+			return fmt.Errorf("failed to process runtime messages: %w", err)
+		}
+
+		// Generate the final block.
 		blk := block.NewEmptyBlock(rtState.CurrentBlock, uint64(ctx.Now().Unix()), block.Normal)
 		blk.Header.IORoot = *hdr.IORoot
 		blk.Header.StateRoot = *hdr.StateRoot
-		// Messages omitted on purpose.
+		blk.Header.MessagesHash = *hdr.MessagesHash
 
 		// Timeout will be cleared by caller.
-		rtState.ExecutorPool.ResetCommitments()
+		rtState.ExecutorPool.ResetCommitments(blk.Header.Round)
 
-		return blk, nil
+		// All good. Hook up the new block.
+		rtState.CurrentBlock = blk
+		rtState.CurrentBlockHeight = ctx.BlockHeight()
+
+		tagV := ValueFinalized{
+			ID:    rtState.Runtime.ID,
+			Round: blk.Header.Round,
+		}
+		ctx.EmitEvent(
+			tmapi.NewEventBuilder(app.Name()).
+				Attribute(KeyFinalized, cbor.Marshal(tagV)).
+				Attribute(KeyRuntimeID, ValueRuntimeID(rtState.Runtime.ID)),
+		)
+
+		return nil
 	case commitment.ErrStillWaiting:
 		// Need more commits.
 		ctx.Logger().Debug("insufficient commitments for finality, waiting",
-			"round", blockNr,
+			"round", round,
 		)
 
-		return nil, nil
+		return nil
 	case commitment.ErrDiscrepancyDetected:
 		// Discrepancy has been detected.
 		ctx.Logger().Warn("executor discrepancy detected",
-			"round", blockNr,
+			"round", round,
 			logging.LogEvent, roothash.LogEventExecutionDiscrepancyDetected,
 		)
 
@@ -491,65 +519,21 @@ func (app *rootHashApplication) tryFinalizeExecutorCommits(
 				Attribute(KeyExecutionDiscrepancyDetected, cbor.Marshal(tagV)).
 				Attribute(KeyRuntimeID, ValueRuntimeID(runtime.ID)),
 		)
-		return nil, nil
+		return nil
 	default:
 	}
 
 	// Something else went wrong, emit empty error block.
 	ctx.Logger().Error("round failed",
-		"round", blockNr,
+		"round", round,
 		"err", err,
 		logging.LogEvent, roothash.LogEventRoundFailed,
 	)
 
 	if err := app.emitEmptyBlock(ctx, rtState, block.RoundFailed); err != nil {
-		return nil, fmt.Errorf("failed to emit empty block: %w", err)
+		return fmt.Errorf("failed to emit empty block: %w", err)
 	}
 
-	return nil, nil
-}
-
-func (app *rootHashApplication) postProcessFinalizedBlock(ctx *tmapi.Context, rtState *roothashState.RuntimeState, blk *block.Block) error {
-	sc := ctx.StartCheckpoint()
-	defer sc.Close()
-
-	for _, message := range blk.Header.Messages {
-		// Currently there are no valid roothash messages, so any message
-		// is treated as unsatisfactory. This is the place which would
-		// otherwise contain message handlers.
-		unsat := errors.New("tendermint/roothash: message is invalid")
-
-		if unsat != nil {
-			ctx.Logger().Error("handler not satisfied with message",
-				"err", unsat,
-				"message", message,
-				logging.LogEvent, roothash.LogEventMessageUnsat,
-			)
-
-			// Substitute empty block.
-			if err := app.emitEmptyBlock(ctx, rtState, block.RoundFailed); err != nil {
-				return fmt.Errorf("failed to emit empty block: %w", err)
-			}
-
-			return nil
-		}
-	}
-
-	sc.Commit()
-
-	// All good. Hook up the new block.
-	rtState.CurrentBlock = blk
-	rtState.CurrentBlockHeight = ctx.BlockHeight()
-
-	tagV := ValueFinalized{
-		ID:    rtState.Runtime.ID,
-		Round: blk.Header.Round,
-	}
-	ctx.EmitEvent(
-		tmapi.NewEventBuilder(app.Name()).
-			Attribute(KeyFinalized, cbor.Marshal(tagV)).
-			Attribute(KeyRuntimeID, ValueRuntimeID(rtState.Runtime.ID)),
-	)
 	return nil
 }
 
@@ -594,18 +578,7 @@ func (app *rootHashApplication) tryFinalizeBlock(
 		}
 	}(rtState.ExecutorPool.NextTimeout)
 
-	finalizedBlock, err := app.tryFinalizeExecutorCommits(ctx, rtState, forced)
-	if err != nil {
-		return fmt.Errorf("failed to finalize executor commits: %w", err)
-	}
-	if finalizedBlock == nil {
-		return nil
-	}
-
-	if err = app.postProcessFinalizedBlock(ctx, rtState, finalizedBlock); err != nil {
-		return fmt.Errorf("failed to post process finalized block: %w", err)
-	}
-	return nil
+	return app.tryFinalizeExecutorCommits(ctx, rtState, forced)
 }
 
 // New constructs a new roothash application instance.

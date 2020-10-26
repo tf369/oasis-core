@@ -157,6 +157,13 @@ type FinalizedEvent struct {
 	Round uint64 `json:"round"`
 }
 
+// MessageEvent is a runtime message processed event.
+type MessageEvent struct {
+	Module string `json:"module,omitempty"`
+	Code   uint32 `json:"code,omitempty"`
+	Index  uint32 `json:"index,omitempty"`
+}
+
 // Event is a roothash event.
 type Event struct {
 	Height int64     `json:"height,omitempty"`
@@ -166,7 +173,8 @@ type Event struct {
 
 	ExecutorCommitted            *ExecutorCommittedEvent            `json:"executor_committed,omitempty"`
 	ExecutionDiscrepancyDetected *ExecutionDiscrepancyDetectedEvent `json:"execution_discrepancy,omitempty"`
-	FinalizedEvent               *FinalizedEvent                    `json:"finalized,omitempty"`
+	Finalized                    *FinalizedEvent                    `json:"finalized,omitempty"`
+	Message                      *MessageEvent                      `json:"message,omitempty"`
 }
 
 // MetricsMonitorable is the interface exposed by backends capable of
@@ -200,6 +208,10 @@ type ConsensusParameters struct {
 	// DebugBypassStake is true iff the roothash should bypass all of the staking
 	// related checks and operations.
 	DebugBypassStake bool `json:"debug_bypass_stake,omitempty"`
+
+	// MaxRuntimeMessages is the maximum number of allowed messages that can be emitted by a runtime
+	// in a single round.
+	MaxRuntimeMessages uint32 `json:"max_runtime_messages"`
 }
 
 const (

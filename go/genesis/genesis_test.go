@@ -134,7 +134,7 @@ func TestGenesisChainContext(t *testing.T) {
 	//       on each run.
 	stableDoc.Staking = staking.Genesis{}
 
-	require.Equal(t, "5a67a9135f2ef388205023fd525b920852126603fafed80dbf1a20c0e41b3372", stableDoc.ChainContext())
+	require.Equal(t, "926eef60f270f10d87dcdc4f5c24fc861d23e6ef153a9085c789862bac8d9f3e", stableDoc.ChainContext())
 }
 
 func TestGenesisSanityCheck(t *testing.T) {

@@ -22,7 +22,9 @@ use crate::{
             signature::{Signature, Signer},
         },
         logger::get_logger,
-        roothash::{Block, ComputeResultsHeader, COMPUTE_RESULTS_HEADER_CONTEXT},
+        roothash::{
+            Block, ComputeResultsHeader, Message as RoothashMessage, COMPUTE_RESULTS_HEADER_CONTEXT,
+        },
     },
     enclave_rpc::{
         demux::Demux as RpcDemux,
@@ -408,13 +410,14 @@ impl Dispatcher {
                         previous_hash: block.header.encoded_hash(),
                         io_root: Some(io_root),
                         state_root: Some(new_state_root),
-                        messages,
+                        messages_hash: Some(RoothashMessage::messages_hash(&messages)),
                     };
 
                     debug!(self.logger, "Transaction batch execution complete";
                         "previous_hash" => ?header.previous_hash,
                         "io_root" => ?header.io_root,
-                        "state_root" => ?header.state_root
+                        "state_root" => ?header.state_root,
+                        "messages_hash" => ?header.messages_hash,
                     );
 
                     let rak_sig = if self.rak.public_key().is_some() {
@@ -430,6 +433,7 @@ impl Dispatcher {
                         io_write_log,
                         state_write_log,
                         rak_sig,
+                        messages,
                     };
 
                     // Send the result back.
